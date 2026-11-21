@@ -1,0 +1,18 @@
+{
+    "Amazon": {
+        "AssetProcessor": {
+            "Settings": {
+                "ScanFolder sqlgenCPP/Assets": {
+                    "watch": "@GEMROOT:sqlgenCPP@/Assets",
+                    "recursive": 1,
+                    "order": 101
+                },
+                "ScanFolder sqlgenCPP/Registry": {
+                    "watch": "@GEMROOT:sqlgenCPP@/Registry",
+                    "recursive": 1,
+                    "order": 102
+                }
+            }
+        }
+    }
+}
