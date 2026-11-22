@@ -17,6 +17,43 @@ if(NOT PAL_TRAIT_SQLGENCPP_SUPPORTED)
     return()
 endif()
 
+################################################################################
+# CodeFirstCppDB_sqlgen (C++26 Reflection + Modules ORM backed by 3rdParty::sqlite)
+################################################################################
+set(_sqlgencpp_default_codefirst_dir "${CMAKE_CURRENT_LIST_DIR}/External/CodeFirstCppDB_sqlgen")
+if(NOT EXISTS "${_sqlgencpp_default_codefirst_dir}/CMakeLists.txt")
+    set(_sqlgencpp_default_codefirst_dir "/home/d5/Developer09/CodeFirstCppDB_sqlgen")
+endif()
+set(SQLGENCPP_CODEFIRST_DIR "${_sqlgencpp_default_codefirst_dir}" CACHE PATH "Path to CodeFirstCppDB_sqlgen source directory")
+unset(_sqlgencpp_default_codefirst_dir)
+
+set(_sqlgencpp_orm_enabled FALSE)
+if(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED
+   AND PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED
+   AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "16.0"
+   AND EXISTS "${SQLGENCPP_CODEFIRST_DIR}/CMakeLists.txt")
+    set(CODEFIRST_SQLITE_TARGET "3rdParty::sqlite" CACHE STRING "" FORCE)
+    set(CODEFIRST_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(CODEFIRST_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(CODEFIRST_INCLUDE_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(CODEFIRST_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(CODEFIRST_ENABLE_STACKTRACE OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory("${SQLGENCPP_CODEFIRST_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CodeFirstCppDB" EXCLUDE_FROM_ALL)
+
+    add_library(${gem_name}.ORM INTERFACE)
+    add_library(Gem::${gem_name}.ORM ALIAS ${gem_name}.ORM)
+    target_link_libraries(${gem_name}.ORM
+        INTERFACE
+            CodeFirstCppDB::Core
+            CodeFirstCppDB::DAL
+    )
+    set(_sqlgencpp_orm_enabled TRUE)
+else()
+    message(STATUS "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM disabled (requires GCC 16+, CMake 4.5+, Ninja, and SQLGENCPP_CODEFIRST_DIR='${SQLGENCPP_CODEFIRST_DIR}').")
+endif()
+
 # The ${gem_name}.API target declares the common interface that users of this gem should depend on in their targets
 ly_add_target(
     NAME ${gem_name}.API INTERFACE
@@ -191,7 +228,27 @@ endif()
 # See if globally, tests are supported
 if(PAL_TRAIT_BUILD_TESTS_SUPPORTED)
     # We globally support tests, see if we support tests on this platform for ${gem_name}.Tests
-    if(PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED)
+    if(PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED AND _sqlgencpp_orm_enabled)
+        # C++26 module test implementation (isolated from AzTest headers)
+        ly_add_target(
+            NAME ${gem_name}.TestImpl STATIC
+            NAMESPACE Gem
+            SCAN_FOR_MODULES
+            CXX_STANDARD 26
+            FILES_CMAKE
+                sqlgencpp_testimpl_files.cmake
+            TARGET_PROPERTIES
+                O3DE_PRIVATE_TARGET TRUE
+            INCLUDE_DIRECTORIES
+                PRIVATE
+                    Tests
+                    Source
+                    Include
+            BUILD_DEPENDENCIES
+                PRIVATE
+                    Gem::${gem_name}.ORM
+        )
+
         # We support ${gem_name}.Tests on this platform, add dependency on the Private Object target
         ly_add_target(
             NAME ${gem_name}.Tests ${PAL_TRAIT_TEST_TARGET_TYPE}
@@ -208,6 +265,7 @@ if(PAL_TRAIT_BUILD_TESTS_SUPPORTED)
                     AZ::AzTest
                     AZ::AzFramework
                     Gem::${gem_name}.Private.Object
+                    Gem::${gem_name}.TestImpl
         )
 
         # Add ${gem_name}.Tests to googletest

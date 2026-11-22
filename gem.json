@@ -5,7 +5,7 @@
     "license": "Apache-2.0 or MIT",
     "license_url": "https://opensource.org/licenses/Apache-2.0 or https://opensource.org/license/MIT",
     "origin": "rzDmyth",
-    "origin_url": "https://github.com/mythrz/sqlgen/",
+    "origin_url": "https://github.com/mythrz/sqlgenCPP/",
     "type": "Code",
     "summary": "Brings sqlgen to O3DE. Quote: sqlgen is a modern, type-safe ORM and SQL query generator for C++20, inspired by Python's SQLAlchemy/SQLModel and Rust's Diesel. It provides a fluent, composable interface for database operations with compile-time type checking and SQL injection protection. sqlgen is based on and tightly integrated with reflect-cpp, a C++-20 library for fast serialization, deserialization and validation using reflection, similar to pydantic in Python, serde in Rust, encoding in Go or aeson in Haskell. Together, reflect-cpp and sqlgen enable reliable and efficient ETL pipelines.",
     "canonical_tags": [
