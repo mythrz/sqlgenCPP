@@ -1,0 +1,3 @@
+[submodule "Code/External/CodeFirstCppDB_sqlgen"]
+	path = Code/External/CodeFirstCppDB_sqlgen
+	url = https://github.com/mythrz/CodeFirstCppDB_sqlgen.git

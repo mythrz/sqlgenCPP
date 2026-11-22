@@ -4,27 +4,28 @@
     "display_name": "sqlgenCPP",
     "license": "Apache-2.0 or MIT",
     "license_url": "https://opensource.org/licenses/Apache-2.0 or https://opensource.org/license/MIT",
-    "origin": "rzDmyth",
-    "origin_url": "https://github.com/mythrz/sqlgenCPP/",
+    "origin": "mythrz",
+    "origin_url": "https://github.com/mythrz/sqlgenCPP",
     "type": "Code",
-    "summary": "Brings sqlgen to O3DE. Quote: sqlgen is a modern, type-safe ORM and SQL query generator for C++20, inspired by Python's SQLAlchemy/SQLModel and Rust's Diesel. It provides a fluent, composable interface for database operations with compile-time type checking and SQL injection protection. sqlgen is based on and tightly integrated with reflect-cpp, a C++-20 library for fast serialization, deserialization and validation using reflection, similar to pydantic in Python, serde in Rust, encoding in Go or aeson in Haskell. Together, reflect-cpp and sqlgen enable reliable and efficient ETL pipelines.",
+    "summary": "Community O3DE Gem integrating CodeFirstCppDB_sqlgen (C++26 reflection & modules Code-First ORM built on sqlgen and reflect-cpp) with O3DE's bundled SQLite3.",
     "canonical_tags": [
         "Gem"
     ],
     "user_tags": [
-        "sqlgenCPP"
+        "sqlgenCPP",
+        "SQLite",
+        "ORM",
+        "Database",
+        "C++26"
     ],
     "platforms": [
-        ""
+        "Linux"
     ],
     "icon_path": "preview.png",
-    "requirements": "pulls official sqlgen, gcc16.2.+",
+    "requirements": "O3DE with C++20 module support in ly_add_target, CMake 4.5+, Ninja/Ninja Multi-Config, GCC 16.1+ (for C++26 CodeFirst ORM).",
     "documentation_url": "https://github.com/mythrz/sqlgenCPP/blob/main/README.md",
-    "dependencies": [
-    ],
+    "dependencies": [],
     "repo_uri": "",
-    "compatible_engines": [
-    ],
-    "engine_api_dependencies":[
-    ]
+    "compatible_engines": [],
+    "engine_api_dependencies": []
 }

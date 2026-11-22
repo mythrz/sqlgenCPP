@@ -20,12 +20,8 @@ endif()
 ################################################################################
 # CodeFirstCppDB_sqlgen (C++26 Reflection + Modules ORM backed by 3rdParty::sqlite)
 ################################################################################
-set(_sqlgencpp_default_codefirst_dir "${CMAKE_CURRENT_LIST_DIR}/External/CodeFirstCppDB_sqlgen")
-if(NOT EXISTS "${_sqlgencpp_default_codefirst_dir}/CMakeLists.txt")
-    set(_sqlgencpp_default_codefirst_dir "/home/d5/Developer09/CodeFirstCppDB_sqlgen")
-endif()
-set(SQLGENCPP_CODEFIRST_DIR "${_sqlgencpp_default_codefirst_dir}" CACHE PATH "Path to CodeFirstCppDB_sqlgen source directory")
-unset(_sqlgencpp_default_codefirst_dir)
+set(SQLGENCPP_CODEFIRST_DIR "${CMAKE_CURRENT_LIST_DIR}/External/CodeFirstCppDB_sqlgen"
+    CACHE PATH "Path to CodeFirstCppDB_sqlgen source directory (defaults to bundled submodule)")
 
 set(_sqlgencpp_orm_enabled FALSE)
 if(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED
@@ -51,7 +47,11 @@ if(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED
     )
     set(_sqlgencpp_orm_enabled TRUE)
 else()
-    message(STATUS "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM disabled (requires GCC 16+, CMake 4.5+, Ninja, and SQLGENCPP_CODEFIRST_DIR='${SQLGENCPP_CODEFIRST_DIR}').")
+    message(STATUS
+        "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM disabled. "
+        "Requires GCC 16+, CMake 4.5+, Ninja/Ninja Multi-Config, and initialized submodule "
+        "(run `git submodule update --init --recursive` or set -DSQLGENCPP_CODEFIRST_DIR=<path>)."
+    )
 endif()
 
 # The ${gem_name}.API target declares the common interface that users of this gem should depend on in their targets
@@ -79,6 +79,9 @@ ly_add_target(
         ${pal_dir}/sqlgencpp_private_files.cmake
     TARGET_PROPERTIES
         O3DE_PRIVATE_TARGET TRUE
+    COMPILE_DEFINITIONS
+        PRIVATE
+            SQLGENCPP_ORM_ENABLED=$<IF:$<BOOL:${_sqlgencpp_orm_enabled}>,1,0>
     INCLUDE_DIRECTORIES
         PRIVATE
             Include
