@@ -66,3 +66,13 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Local IDE / editor settings
+.vscode/
+
+# Local SQLite database artifacts & backups
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.bak*
