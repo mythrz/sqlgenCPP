@@ -1,3 +1,11 @@
+/*
+ * Copyright (c) Contributors to the Open 3D Engine Project.
+ * For complete copyright and license terms please see the LICENSE at the root of this distribution.
+ *
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ *
+ */
+
 #include "Clients/SqlgenCodeFirstTestImpl.h"
 
 import std;
@@ -33,7 +41,7 @@ namespace sqlgenCPP::Tests
 
         struct GameTestDbContext : DAL::DbContextBase<DAL::SQLiteConnection>
         {
-            // Intentionally declared before Player/Item to verify topological FK sort
+            // Declared before Player/Item to exercise topological FK table creation order
             Set<InventoryEntry> inventory{ this };
             Set<Player> players{ this };
             Set<Item> items{ this };
@@ -52,6 +60,23 @@ namespace sqlgenCPP::Tests
         DbTestOutcome Fail(std::string msg)
         {
             return DbTestOutcome{ false, std::move(msg) };
+        }
+
+        template <typename DbSetT>
+        std::expected<void, std::string> ExpectCount(const DbSetT& set, std::size_t expected, std::string_view label)
+        {
+            const auto res = set.query().try_count();
+            if (!res)
+            {
+                return std::unexpected(std::string(label) + " try_count failed: " + res.error().to_string());
+            }
+            if (*res != expected)
+            {
+                return std::unexpected(
+                    std::string(label) + " expected count " + std::to_string(expected) +
+                    ", got " + std::to_string(*res));
+            }
+            return {};
         }
 
         template <typename Fn>
@@ -85,9 +110,26 @@ namespace sqlgenCPP::Tests
             {
                 return Fail("ensure_created failed: " + res.error().to_string());
             }
-            if (db.players.count() != 0)
+
+            if (auto chk = ExpectCount(db.players, 0, "players"); !chk)
             {
-                return Fail("Expected 0 players after schema creation");
+                return Fail(chk.error());
+            }
+            if (auto chk = ExpectCount(db.items, 0, "items"); !chk)
+            {
+                return Fail(chk.error());
+            }
+            if (auto chk = ExpectCount(db.inventory, 0, "inventory"); !chk)
+            {
+                return Fail(chk.error());
+            }
+
+            // Verify foreign-key enforcement rejects an orphan InventoryEntry
+            auto orphan = db.inventory.add_returning(
+                InventoryEntry{ .id = 0, .player_id = 9999, .item_id = 9999, .quantity = 1 });
+            if (orphan.has_value())
+            {
+                return Fail("Expected foreign-key constraint violation when inserting orphan InventoryEntry");
             }
             return Ok();
         });
@@ -126,9 +168,17 @@ namespace sqlgenCPP::Tests
                 return Fail("add_returning(InventoryEntry) failed");
             }
 
-            if (db.players.count() != 1 || db.items.count() != 1 || db.inventory.count() != 1)
+            if (auto chk = ExpectCount(db.players, 1, "players"); !chk)
             {
-                return Fail("Unexpected seeded row counts");
+                return Fail(chk.error());
+            }
+            if (auto chk = ExpectCount(db.items, 1, "items"); !chk)
+            {
+                return Fail(chk.error());
+            }
+            if (auto chk = ExpectCount(db.inventory, 1, "inventory"); !chk)
+            {
+                return Fail(chk.error());
             }
             return Ok();
         });
@@ -148,7 +198,7 @@ namespace sqlgenCPP::Tests
                 return Fail("ensure_created failed: " + res.error().to_string());
             }
 
-            // Create
+            // Create (immediate add_returning to retrieve generated ID)
             auto created = db.players.add_returning(Player{ .id = 0, .handle = "@mage", .display_name = "Mage", .level = 5 });
             if (!created)
             {
@@ -157,19 +207,29 @@ namespace sqlgenCPP::Tests
 
             // Read
             auto found = db.players.try_find(created->id);
-            if (!found || !found->has_value() || (*found)->display_name != "Mage")
+            if (!found || !found->has_value() || (*found)->display_name != "Mage" || (*found)->level != 5)
             {
                 return Fail("try_find failed to return created player");
             }
 
-            // Update
+            // Enable deferred Unit-of-Work mode so save_changes() actually flushes staged writes
+            db.defer_changes(true);
+
+            // Deferred Update: verify NOT persisted before save_changes(), IS persisted after
             Player updated = **found;
             updated.display_name = "Archmage";
             updated.level = 10;
             if (auto updRes = db.players.update(updated); !updRes)
             {
-                return Fail("update failed: " + updRes.error().to_string());
+                return Fail("deferred update staging failed: " + updRes.error().to_string());
             }
+
+            auto beforeSave = db.players.try_find(created->id);
+            if (!beforeSave || !beforeSave->has_value() || (*beforeSave)->level != 5)
+            {
+                return Fail("Deferred update became visible in SQLite before save_changes()");
+            }
+
             if (auto saveRes = db.save_changes(); !saveRes)
             {
                 return Fail("save_changes after update failed: " + saveRes.error().to_string());
@@ -178,14 +238,21 @@ namespace sqlgenCPP::Tests
             auto refetched = db.players.try_find(created->id);
             if (!refetched || !refetched->has_value() || (*refetched)->display_name != "Archmage" || (*refetched)->level != 10)
             {
-                return Fail("Updated player values were not persisted");
+                return Fail("Updated player values were not persisted by save_changes()");
             }
 
-            // Delete
+            // Deferred Delete: verify row still exists before save_changes(), gone after
             if (auto remRes = db.players.remove(created->id); !remRes)
             {
-                return Fail("remove failed: " + remRes.error().to_string());
+                return Fail("deferred remove staging failed: " + remRes.error().to_string());
             }
+
+            auto beforeDeleteSave = db.players.try_find(created->id);
+            if (!beforeDeleteSave || !beforeDeleteSave->has_value())
+            {
+                return Fail("Deferred remove deleted row before save_changes()");
+            }
+
             if (auto saveRes = db.save_changes(); !saveRes)
             {
                 return Fail("save_changes after remove failed: " + saveRes.error().to_string());
@@ -194,7 +261,7 @@ namespace sqlgenCPP::Tests
             auto afterDelete = db.players.try_find(created->id);
             if (!afterDelete || afterDelete->has_value())
             {
-                return Fail("Deleted player was still found");
+                return Fail("Deleted player was still found after save_changes()");
             }
             return Ok();
         });
@@ -233,9 +300,9 @@ namespace sqlgenCPP::Tests
             {
                 return Fail("Expected transaction to fail on duplicate unique handle");
             }
-            if (db.players.count() != 0)
+            if (auto chk = ExpectCount(db.players, 0, "players after rollback"); !chk)
             {
-                return Fail("Expected rollback to leave 0 players in database");
+                return Fail(chk.error());
             }
             return Ok();
         });
@@ -257,6 +324,27 @@ namespace sqlgenCPP::Tests
                     return Fail("connect (write) failed: " + conn.error().to_string());
                 }
                 GameTestDbContext db(*conn);
+
+                // Verify SQLite actually activated WAL journal mode on the disk database
+                auto walCheck = db.query_rows("PRAGMA journal_mode;");
+                if (!walCheck || walCheck->rows.empty() || walCheck->rows[0].cells.empty())
+                {
+                    return Fail("Failed to query PRAGMA journal_mode");
+                }
+                const auto* modeStr = std::get_if<std::string>(&walCheck->rows[0].cells[0]);
+                if (!modeStr)
+                {
+                    return Fail("Unexpected non-string result from PRAGMA journal_mode");
+                }
+                std::string modeLower = *modeStr;
+                std::ranges::transform(modeLower, modeLower.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if (modeLower != "wal")
+                {
+                    return Fail("Expected effective PRAGMA journal_mode='wal', got '" + modeLower + "'");
+                }
+
                 if (auto res = db.ensure_created(); !res)
                 {
                     return Fail("ensure_created failed: " + res.error().to_string());
