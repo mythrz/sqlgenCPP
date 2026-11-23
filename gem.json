@@ -7,7 +7,7 @@
     "origin": "mythrz",
     "origin_url": "https://github.com/mythrz/sqlgenCPP",
     "type": "Code",
-    "summary": "Community O3DE Gem integrating CodeFirstCppDB_sqlgen (C++26 reflection & modules Code-First ORM built on sqlgen and reflect-cpp) with O3DE's bundled SQLite3.",
+    "summary": "Experimental community O3DE Gem integrating CodeFirstCppDB_sqlgen (C++26 reflection & modules Code-First ORM built on sqlgen and reflect-cpp) with O3DE's bundled SQLite3.",
     "canonical_tags": [
         "Gem"
     ],
@@ -22,7 +22,7 @@
         "Linux"
     ],
     "icon_path": "preview.png",
-    "requirements": "O3DE with C++20 module support in ly_add_target, CMake 4.5+, Ninja/Ninja Multi-Config, GCC 16.1+ (for C++26 CodeFirst ORM).",
+    "requirements": "O3DE fork with C++20 module support in ly_add_target (tested on mythrz/o3de@ff890e8e), CMake 4.5+, Ninja/Ninja Multi-Config, GCC 16.1+ for C++26 CodeFirst ORM (path service builds standalone on standard O3DE).",
     "documentation_url": "https://github.com/mythrz/sqlgenCPP/blob/main/README.md",
     "dependencies": [],
     "repo_uri": "",

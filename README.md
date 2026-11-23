@@ -1,26 +1,41 @@
 # sqlgenCPP — O3DE Gem
 
-A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that brings [`CodeFirstCppDB_sqlgen`](https://github.com/mythrz/CodeFirstCppDB_sqlgen) — a C++26 module-based, reflection-driven Code-First ORM built on [`sqlgen`](https://github.com/munich-data-engineering/sqlgen) and [`reflect-cpp`](https://github.com/getml/reflect-cpp) — into O3DE, backed directly by O3DE's bundled **SQLite3 (`3rdParty::sqlite`)**.
+A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integrates [`CodeFirstCppDB_sqlgen`](https://github.com/mythrz/CodeFirstCppDB_sqlgen) — a C++26 module-based, reflection-driven Code-First ORM built on [`sqlgen`](https://github.com/munich-data-engineering/sqlgen) and [`reflect-cpp`](https://github.com/getml/reflect-cpp) — into O3DE, backed by O3DE's bundled **SQLite3 (`3rdParty::sqlite`)**.
+
+> **Maturity Note:** Currently targeted at **Linux (`x86_64`) GCC 16+ prototyping and evaluation**. Before using the pinned ORM for durable production player saves, track the open `CodeFirstCppDB_sqlgen` / upstream `sqlgen` hardening work (typed SQLite iterator error/NUL handling, batch write atomicity, and versioned migrations).
 
 ---
 
 ## Features
 
-- **Zero Duplicate SQLite:** Links directly against O3DE's bundled `3rdParty::sqlite` static library (no second system `libsqlite3.so` inside `Editor` or `GameLauncher`).
-- **Clean C++20 / C++26 Boundary:** Exposes `Gem::sqlgenCPP.ORM` for opt-in C++26 module targets (`import std; import core; import dal;`) while keeping standard O3DE components, `Editor`, and `AzTest` harnesses on C++20 (`-fno-exceptions`).
-- **O3DE Runtime Path Resolution:** Provides `sqlgenCPP::sqlgenCPPRequestBus` / `sqlgenCPPInterface` (`ResolveDatabasePath`, `GetDefaultDatabaseDirectory`, `IsCodeFirstOrmEnabled`) to resolve writable SQLite database paths under `@user@/Database` via `AZ::IO::FileIOBase`.
-- **AzTest Unit Test Suite:** Includes `Gem::sqlgenCPP.Tests` verifying schema creation, FK topological sorting, initial database seeding, CRUD (`add_returning`, `try_find`, `update`, `remove`, `save_changes`), transaction rollback, WAL disk persistence, and `sqlgenCPPSystemComponent` path resolution.
+- **Injected Engine SQLite (`3rdParty::sqlite`):** Passes `CODEFIRST_SQLITE_TARGET=3rdParty::sqlite` into `CodeFirstCppDB_sqlgen` so the ORM links O3DE's bundled static SQLite3 library rather than pulling a separate system `libsqlite3.so` into the Gem. *(Verify final executable/Editor linkage with `ldd` if other third-party Gems also ship SQLite.)*
+- **Clean C++20 / C++26 Target Boundary:** Exposes `Gem::sqlgenCPP.ORM` for opt-in C++26 module targets (`import std; import core; import dal;`) while keeping standard O3DE components, `Editor`, and `AzTest` harnesses on C++20 (`-fno-exceptions`).
+- **Explicit ORM Build Modes (`SQLGENCPP_ORM_MODE`):**
+  - `AUTO` *(default)*: Enables `Gem::sqlgenCPP.ORM` when all prerequisites are present; logs exact missing prerequisites and falls back to the path service otherwise.
+  - `REQUIRED`: Fails CMake configure with a clear `FATAL_ERROR` listing any missing prerequisites.
+  - `OFF`: Explicitly builds the C++20 path service only (useful for testing the fallback path).
+- **Containment-Checked O3DE Path Service:** `sqlgenCPP::sqlgenCPPRequestBus` / `sqlgenCPPInterface` provides `ResolveDatabasePath`, `GetDefaultDatabaseDirectory`, and `IsCodeFirstOrmEnabled`:
+  - Enforces strict containment under `@user@/Database` (rejects empty paths, absolute paths, and `..` directory traversal before creating directories).
+  - Preserves `":memory:"`.
+  - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`).
+- **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
+  - Path-service and `sqlgenCPPSystemComponent` tests **always** build and run (including with `SQLGENCPP_ORM_MODE=OFF`).
+  - When ORM is enabled, also runs C++26 tests covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, and `SystemComponent` path + persistence.
 
 ---
 
-## Requirements
+## Requirements & Tested Engine Pairing
 
-- **O3DE Engine:** O3DE with opt-in C++20 module support in `ly_add_target` (`cmake/CxxModules.cmake`, `SCAN_FOR_MODULES`, `CXX_STANDARD`).
-- **Compiler:** **GCC 16.1+** (required for C++26 `-freflection`, P2996/P3394 annotations, and `import std`).
+### Full C++26 ORM Mode (`SQLGENCPP_ORM_MODE=REQUIRED` or `AUTO`)
+- **O3DE Engine:** Requires an O3DE build with opt-in C++20 module support (`cmake/CxxModules.cmake`, `SCAN_FOR_MODULES`, and `PRIVATE` `CXX_STANDARD` in `ly_add_target`).
+  - **Tested Fork & Commit:** [`mythrz/o3de`](https://github.com/mythrz/o3de) (`development` @ [`ff890e8e8a`](https://github.com/mythrz/o3de/commit/ff890e8e8a1deb413de465a058e9d304e029dc64))
+  - *(Note: Upstream `o3de/o3de` `development` does not yet include `cmake/CxxModules.cmake` or `ly_add_target` module arguments. Against unmodified upstream O3DE, `SQLGENCPP_ORM_MODE=AUTO` builds the C++20 path service only and `SQLGENCPP_ORM_MODE=REQUIRED` fails configure with the missing trait names.)*
+- **Compiler:** **GCC 16.1+** (tested with GCC 16.2.1 on Linux `x86_64`).
 - **Build System:** **CMake 4.5+** and **Ninja** (`Ninja` or `Ninja Multi-Config`).
-- **Platform:** Linux (`x86_64`).
-
-> **Note:** On compilers or generators without C++26 module support, the Gem still configures and builds its C++20 `sqlgenCPP` module cleanly with `IsCodeFirstOrmEnabled() == false` (skipping the C++26 ORM targets).
+- **CMake Options:**
+  - `SQLGENCPP_ORM_MODE=AUTO|REQUIRED|OFF` (default: `AUTO`)
+  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces are empty so `libstdc++exp.a` is not linked).
+  - `SQLGENCPP_CODEFIRST_DIR=<path>` (default: bundled submodule `Code/External/CodeFirstCppDB_sqlgen`).
 
 ---
 
@@ -28,13 +43,13 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that bring
 
 ### 1. Clone With Submodules
 ```bash
-git clone --recurse-submodules https://github.com/mythrz/sqlgenCPP.git
+git clone --recurse-submodules --shallow-submodules https://github.com/mythrz/sqlgenCPP.git
 ```
 If you already cloned without submodules:
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --depth 1
 ```
-*(Optional: for local ORM development, you can override the bundled submodule path at CMake configure time with `-DSQLGENCPP_CODEFIRST_DIR=/path/to/CodeFirstCppDB_sqlgen`.)*
+*(Note: `sqlgen` and `reflect-cpp` each pin a `vcpkg` submodule upstream; `--shallow-submodules` / `--depth 1` significantly speeds up checkout. `vcpkg` is disabled by `CodeFirstCppDB_sqlgen` and is not used at build or runtime.)*
 
 ### 2. Register and Enable the Gem in Your O3DE Project
 ```bash
@@ -42,18 +57,27 @@ git submodule update --init --recursive
 <O3DE_ENGINE>/scripts/o3de.sh enable-gem -gn sqlgenCPP -pp <PATH_TO_YOUR_PROJECT>
 ```
 
-### 3. Build and Run O3DE Unit Tests
-Configure your project with GCC 16+ and Ninja Multi-Config (`-DPAL_TRAIT_BUILD_TESTS_SUPPORTED=TRUE`), then build and run `sqlgenCPP.Tests`:
+### 3. Configure, Build, and Run O3DE Unit Tests
+Configure your project against [`mythrz/o3de@ff890e8e8a`](https://github.com/mythrz/o3de/commit/ff890e8e8a1deb413de465a058e9d304e029dc64) with GCC 16+, Ninja Multi-Config, `-DPAL_TRAIT_BUILD_TESTS_SUPPORTED=TRUE`, and `-DSQLGENCPP_ORM_MODE=REQUIRED`:
+
 ```bash
+cmake -S <PROJECT_DIR> -B <BUILD_DIR> -G "Ninja Multi-Config" \
+  -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+  -DPAL_TRAIT_BUILD_TESTS_SUPPORTED=TRUE \
+  -DSQLGENCPP_ORM_MODE=REQUIRED \
+  -DO3DE_EXTRA_C_FLAGS="-w" -DO3DE_EXTRA_CXX_FLAGS="-w"
+
 cmake --build <BUILD_DIR> --config profile --target AzTestRunner sqlgenCPP.Tests -j 2
 <BUILD_DIR>/bin/profile/AzTestRunner <BUILD_DIR>/bin/profile/libsqlgenCPP.Tests.so AzRunUnitTests
 ```
+
+To verify the fallback (path-service-only) mode, reconfigure with `-DSQLGENCPP_ORM_MODE=OFF` and run the same `AzTestRunner` command — all `SqlgenCPPPathServiceTest.*` tests still build and pass.
 
 ---
 
 ## Using `sqlgenCPP` in Your Game Gem
 
-To avoid mixing `#include <AzCore/...>` (C++20, `-fno-exceptions`) with `import std;` / `import dal;` (C++26, `-fexceptions`), keep your game's ORM entities and `DbContext` in a dedicated C++26 static sub-target behind a C++20 header facade:
+Keep your game's ORM entities and `DbContext` in a dedicated C++26 static sub-target behind a C++20 header facade so `#include <AzCore/...>` (`-fno-exceptions`) is never mixed with `import std;` / `import dal;` (`-fexceptions`):
 
 ```cmake
 # Inside your Game Gem's Code/CMakeLists.txt
@@ -95,11 +119,11 @@ struct GameDbContext : DAL::DbContextBase<DAL::SQLiteConnection>
 };
 ```
 
-> **Runtime Recommendations:**
-> - Resolve writable save database paths via `sqlgenCPP::sqlgenCPPInterface::Get()->ResolveDatabasePath("save.db")`.
-> - Enable `wal_mode = true` and a non-zero `busy_timeout` in `DAL::SQLiteConnectionOptions` for game workloads.
+> **Runtime & Boundary Guidelines:**
+> - **Exception firewall:** Catch all C++ exceptions inside your C++26 database translation units before returning into O3DE's `-fno-exceptions` code, and keep both sides on the same compiler/standard-library ABI.
+> - **Paths:** Resolve save paths via `sqlgenCPP::sqlgenCPPInterface::Get()->ResolveDatabasePath("save.db")`. Handle `AZ::Failure` explicitly rather than falling back to temp storage for player saves.
+> - **SQLite WAL & timeouts:** Set `wal_mode = true` and `busy_timeout = 5000ms` in `DAL::SQLiteConnectionOptions`, and verify `PRAGMA journal_mode` if WAL is required.
 > - **Thread safety:** `DAL::DbContextBase`, `DAL::DbSet`, and `DAL::SQLiteConnection` are **not thread-safe**. Own one connection/context on a dedicated database worker thread and marshal callbacks back to the main thread via `AZ::TickBus::QueueFunction(...)`.
-> - **Exception firewall:** Catch all C++ exceptions inside your C++26 database translation units before returning into O3DE's `-fno-exceptions` code.
 
 ---
 
