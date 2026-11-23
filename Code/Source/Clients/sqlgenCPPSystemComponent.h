@@ -9,7 +9,6 @@
 #pragma once
 
 #include <AzCore/Component/Component.h>
-#include <AzCore/Component/TickBus.h>
 #include <sqlgenCPP/sqlgenCPPBus.h>
 
 namespace sqlgenCPP
@@ -17,7 +16,6 @@ namespace sqlgenCPP
     class sqlgenCPPSystemComponent
         : public AZ::Component
         , protected sqlgenCPPRequestBus::Handler
-        , public AZ::TickBus::Handler
     {
     public:
         AZ_COMPONENT_DECL(sqlgenCPPSystemComponent);
@@ -37,8 +35,10 @@ namespace sqlgenCPP
         // sqlgenCPPRequestBus interface implementation
         AZ::Outcome<AZStd::string, AZStd::string> ResolveDatabasePath(
             AZStd::string_view relativeDbPath,
-            bool createParentDirectory = true) const override;
-        AZStd::string GetDefaultDatabaseDirectory() const override;
+            bool createParentDirectory = true,
+            bool allowTempFallbackWhenNoFileIO = false) const override;
+        AZStd::string GetDefaultDatabaseDirectory(
+            bool allowTempFallbackWhenNoFileIO = false) const override;
         bool IsCodeFirstOrmEnabled() const override;
         ////////////////////////////////////////////////////////////////////////
 
@@ -47,11 +47,6 @@ namespace sqlgenCPP
         void Init() override;
         void Activate() override;
         void Deactivate() override;
-        ////////////////////////////////////////////////////////////////////////
-
-        ////////////////////////////////////////////////////////////////////////
-        // AZTickBus interface implementation
-        void OnTick(float deltaTime, AZ::ScriptTimePoint time) override;
         ////////////////////////////////////////////////////////////////////////
     };
 

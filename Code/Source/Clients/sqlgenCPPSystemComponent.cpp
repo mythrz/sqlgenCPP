@@ -18,6 +18,20 @@
 
 namespace sqlgenCPP
 {
+    namespace
+    {
+        bool IsStrictlyContainedInBase(const std::filesystem::path& baseDir, const std::filesystem::path& candidate)
+        {
+            const std::filesystem::path rel = candidate.lexically_relative(baseDir);
+            if (rel.empty() || rel == ".")
+            {
+                return false;
+            }
+            const auto first = *rel.begin();
+            return first != ".." && !rel.is_absolute();
+        }
+    } // namespace
+
     AZ_COMPONENT_IMPL(sqlgenCPPSystemComponent, "sqlgenCPPSystemComponent",
         sqlgenCPPSystemComponentTypeId);
 
@@ -65,7 +79,7 @@ namespace sqlgenCPP
         }
     }
 
-    AZStd::string sqlgenCPPSystemComponent::GetDefaultDatabaseDirectory() const
+    AZStd::string sqlgenCPPSystemComponent::GetDefaultDatabaseDirectory(bool allowTempFallbackWhenNoFileIO) const
     {
         if (auto* fileIO = AZ::IO::FileIOBase::GetInstance(); fileIO != nullptr)
         {
@@ -73,13 +87,20 @@ namespace sqlgenCPP
             {
                 return AZStd::string(resolved->c_str());
             }
+            // FileIO is active but @user@/Database failed to resolve: never silently fall back to OS temp.
+            return {};
+        }
+
+        if (!allowTempFallbackWhenNoFileIO)
+        {
+            return {};
         }
 
         std::error_code ec;
         const auto tempBase = std::filesystem::temp_directory_path(ec);
         if (!ec)
         {
-            const auto fallbackDir = tempBase / "O3DE_sqlgenCPP";
+            const auto fallbackDir = (tempBase / "O3DE_sqlgenCPP").lexically_normal();
             return AZStd::string(fallbackDir.string().c_str());
         }
 
@@ -88,7 +109,8 @@ namespace sqlgenCPP
 
     AZ::Outcome<AZStd::string, AZStd::string> sqlgenCPPSystemComponent::ResolveDatabasePath(
         AZStd::string_view relativeDbPath,
-        bool createParentDirectory) const
+        bool createParentDirectory,
+        bool allowTempFallbackWhenNoFileIO) const
     {
         if (relativeDbPath.empty())
         {
@@ -101,20 +123,24 @@ namespace sqlgenCPP
         }
 
         const std::filesystem::path inputPath(std::string_view(relativeDbPath.data(), relativeDbPath.size()));
-        std::filesystem::path resolvedPath;
-
-        if (inputPath.is_absolute())
+        if (inputPath.is_absolute() || inputPath.has_root_path() || inputPath.has_root_name())
         {
-            resolvedPath = inputPath;
+            return AZ::Failure(AZStd::string("Database path must be relative to the database directory (absolute paths are rejected)."));
         }
-        else
+
+        const AZStd::string baseDirStr = GetDefaultDatabaseDirectory(allowTempFallbackWhenNoFileIO);
+        if (baseDirStr.empty())
         {
-            const AZStd::string baseDir = GetDefaultDatabaseDirectory();
-            if (baseDir.empty())
-            {
-                return AZ::Failure(AZStd::string("Failed to resolve default database directory."));
-            }
-            resolvedPath = std::filesystem::path(std::string_view(baseDir.data(), baseDir.size())) / inputPath;
+            return AZ::Failure(AZStd::string("Failed to resolve @user@/Database directory (FileIOBase unavailable or @user@ alias unset)."));
+        }
+
+        const std::filesystem::path baseDir =
+            std::filesystem::path(std::string_view(baseDirStr.data(), baseDirStr.size())).lexically_normal();
+        const std::filesystem::path resolvedPath = (baseDir / inputPath).lexically_normal();
+
+        if (!IsStrictlyContainedInBase(baseDir, resolvedPath))
+        {
+            return AZ::Failure(AZStd::string("Database path escapes the configured database directory."));
         }
 
         if (createParentDirectory && resolvedPath.has_parent_path())
@@ -130,7 +156,7 @@ namespace sqlgenCPP
             }
         }
 
-        return AZ::Success(AZStd::string(resolvedPath.lexically_normal().string().c_str()));
+        return AZ::Success(AZStd::string(resolvedPath.string().c_str()));
     }
 
     bool sqlgenCPPSystemComponent::IsCodeFirstOrmEnabled() const
@@ -149,17 +175,11 @@ namespace sqlgenCPP
     void sqlgenCPPSystemComponent::Activate()
     {
         sqlgenCPPRequestBus::Handler::BusConnect();
-        AZ::TickBus::Handler::BusConnect();
     }
 
     void sqlgenCPPSystemComponent::Deactivate()
     {
-        AZ::TickBus::Handler::BusDisconnect();
         sqlgenCPPRequestBus::Handler::BusDisconnect();
-    }
-
-    void sqlgenCPPSystemComponent::OnTick([[maybe_unused]] float deltaTime, [[maybe_unused]] AZ::ScriptTimePoint time)
-    {
     }
 
 } // namespace sqlgenCPP

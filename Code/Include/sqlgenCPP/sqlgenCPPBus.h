@@ -24,15 +24,23 @@ namespace sqlgenCPP
         AZ_RTTI(sqlgenCPPRequests, sqlgenCPPRequestsTypeId);
         virtual ~sqlgenCPPRequests() = default;
 
-        //! Resolves a relative SQLite database path under O3DE's writable @user@/Database directory
-        //! (falling back to the OS temp directory when FileIOBase is unavailable, e.g. headless unit tests).
-        //! Optionally creates parent directories so SQLite can open or create the file immediately.
+        //! Resolves a relative SQLite database path strictly contained within O3DE's writable
+        //! @user@/Database directory.
+        //! - ":memory:" is returned unchanged without creating directories.
+        //! - Empty paths, absolute paths, and paths escaping @user@/Database via ".." are rejected.
+        //! - If AZ::IO::FileIOBase is active and @user@/Database fails to resolve, returns AZ::Failure
+        //!   (never silently redirects player saves to OS temporary storage).
+        //! - If AZ::IO::FileIOBase is absent (e.g. headless unit tests), returns AZ::Failure unless
+        //!   allowTempFallbackWhenNoFileIO is explicitly set to true.
         virtual AZ::Outcome<AZStd::string, AZStd::string> ResolveDatabasePath(
             AZStd::string_view relativeDbPath,
-            bool createParentDirectory = true) const = 0;
+            bool createParentDirectory = true,
+            bool allowTempFallbackWhenNoFileIO = false) const = 0;
 
-        //! Returns the resolved default directory used for runtime SQLite databases.
-        virtual AZStd::string GetDefaultDatabaseDirectory() const = 0;
+        //! Returns the resolved default directory used for runtime SQLite databases (@user@/Database),
+        //! or an empty string if unavailable (unless allowTempFallbackWhenNoFileIO is true and FileIOBase is absent).
+        virtual AZStd::string GetDefaultDatabaseDirectory(
+            bool allowTempFallbackWhenNoFileIO = false) const = 0;
 
         //! Returns true if the Gem was built with the C++26 CodeFirstCppDB_sqlgen ORM enabled.
         virtual bool IsCodeFirstOrmEnabled() const = 0;
