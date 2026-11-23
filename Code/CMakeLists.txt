@@ -22,37 +22,71 @@ endif()
 ################################################################################
 set(SQLGENCPP_CODEFIRST_DIR "${CMAKE_CURRENT_LIST_DIR}/External/CodeFirstCppDB_sqlgen"
     CACHE PATH "Path to CodeFirstCppDB_sqlgen source directory (defaults to bundled submodule)")
+set(SQLGENCPP_ORM_MODE "AUTO"
+    CACHE STRING "CodeFirst C++26 ORM build mode: AUTO (enable if supported), REQUIRED (fail if unsupported), or OFF (path service only)")
+set_property(CACHE SQLGENCPP_ORM_MODE PROPERTY STRINGS AUTO REQUIRED OFF)
+option(SQLGENCPP_ENABLE_STACKTRACE "Enable Debug std::stacktrace capture in CodeFirstCppDB::Core" OFF)
+
+string(TOUPPER "${SQLGENCPP_ORM_MODE}" _sqlgencpp_orm_mode_upper)
+if(NOT _sqlgencpp_orm_mode_upper MATCHES "^(AUTO|REQUIRED|OFF)$")
+    message(FATAL_ERROR "sqlgenCPP: Invalid SQLGENCPP_ORM_MODE='${SQLGENCPP_ORM_MODE}'. Expected AUTO, REQUIRED, or OFF.")
+endif()
 
 set(_sqlgencpp_orm_enabled FALSE)
-if(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED
-   AND PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED
-   AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "16.0"
-   AND EXISTS "${SQLGENCPP_CODEFIRST_DIR}/CMakeLists.txt")
-    set(CODEFIRST_SQLITE_TARGET "3rdParty::sqlite" CACHE STRING "" FORCE)
-    set(CODEFIRST_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(CODEFIRST_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(CODEFIRST_INCLUDE_SAMPLES OFF CACHE BOOL "" FORCE)
-    set(CODEFIRST_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-    set(CODEFIRST_ENABLE_STACKTRACE OFF CACHE BOOL "" FORCE)
-
-    add_subdirectory("${SQLGENCPP_CODEFIRST_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CodeFirstCppDB" EXCLUDE_FROM_ALL)
-
-    add_library(${gem_name}.ORM INTERFACE)
-    add_library(Gem::${gem_name}.ORM ALIAS ${gem_name}.ORM)
-    target_link_libraries(${gem_name}.ORM
-        INTERFACE
-            CodeFirstCppDB::Core
-            CodeFirstCppDB::DAL
-    )
-    set(_sqlgencpp_orm_enabled TRUE)
+if(_sqlgencpp_orm_mode_upper STREQUAL "OFF")
+    message(STATUS "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM explicitly disabled (SQLGENCPP_ORM_MODE=OFF).")
 else()
-    message(STATUS
-        "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM disabled. "
-        "Requires GCC 16+, CMake 4.5+, Ninja/Ninja Multi-Config, and initialized submodule "
-        "(run `git submodule update --init --recursive` or set -DSQLGENCPP_CODEFIRST_DIR=<path>)."
-    )
+    set(_sqlgencpp_missing_prereqs "")
+    if(NOT PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED)
+        list(APPEND _sqlgencpp_missing_prereqs "PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED (requires O3DE engine with cmake/CxxModules.cmake, CMake >= 3.28, supported generator/compiler)")
+    endif()
+    if(NOT PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED)
+        list(APPEND _sqlgencpp_missing_prereqs "PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED (requires CMake >= 4.5 and Ninja/Ninja Multi-Config)")
+    endif()
+    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "16.0"))
+        list(APPEND _sqlgencpp_missing_prereqs "GCC >= 16.0 (detected '${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}')")
+    endif()
+    if(NOT EXISTS "${SQLGENCPP_CODEFIRST_DIR}/CMakeLists.txt")
+        list(APPEND _sqlgencpp_missing_prereqs "CodeFirstCppDB_sqlgen checkout at '${SQLGENCPP_CODEFIRST_DIR}'")
+    else()
+        if(NOT EXISTS "${SQLGENCPP_CODEFIRST_DIR}/extern/sqlgen/CMakeLists.txt")
+            list(APPEND _sqlgencpp_missing_prereqs "initialized nested submodule 'extern/sqlgen' (run `git submodule update --init --recursive`)")
+        endif()
+        if(NOT EXISTS "${SQLGENCPP_CODEFIRST_DIR}/extern/reflect-cpp/CMakeLists.txt")
+            list(APPEND _sqlgencpp_missing_prereqs "initialized nested submodule 'extern/reflect-cpp' (run `git submodule update --init --recursive`)")
+        endif()
+    endif()
+
+    if(NOT _sqlgencpp_missing_prereqs)
+        set(CODEFIRST_SQLITE_TARGET "3rdParty::sqlite" CACHE STRING "" FORCE)
+        set(CODEFIRST_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(CODEFIRST_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(CODEFIRST_INCLUDE_SAMPLES OFF CACHE BOOL "" FORCE)
+        set(CODEFIRST_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(CODEFIRST_ENABLE_STACKTRACE ${SQLGENCPP_ENABLE_STACKTRACE} CACHE BOOL "" FORCE)
+
+        add_subdirectory("${SQLGENCPP_CODEFIRST_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CodeFirstCppDB" EXCLUDE_FROM_ALL)
+
+        add_library(${gem_name}.ORM INTERFACE)
+        add_library(Gem::${gem_name}.ORM ALIAS ${gem_name}.ORM)
+        target_link_libraries(${gem_name}.ORM
+            INTERFACE
+                CodeFirstCppDB::Core
+                CodeFirstCppDB::DAL
+        )
+        set(_sqlgencpp_orm_enabled TRUE)
+    else()
+        string(JOIN "; " _sqlgencpp_missing_str ${_sqlgencpp_missing_prereqs})
+        if(_sqlgencpp_orm_mode_upper STREQUAL "REQUIRED")
+            message(FATAL_ERROR "sqlgenCPP: SQLGENCPP_ORM_MODE=REQUIRED but prerequisites are missing: ${_sqlgencpp_missing_str}")
+        else()
+            message(STATUS "sqlgenCPP: CodeFirstCppDB_sqlgen C++26 ORM disabled (missing: ${_sqlgencpp_missing_str}). Building path service only.")
+        endif()
+        unset(_sqlgencpp_missing_str)
+    endif()
+    unset(_sqlgencpp_missing_prereqs)
 endif()
+unset(_sqlgencpp_orm_mode_upper)
 
 # The ${gem_name}.API target declares the common interface that users of this gem should depend on in their targets
 ly_add_target(
@@ -231,33 +265,40 @@ endif()
 # See if globally, tests are supported
 if(PAL_TRAIT_BUILD_TESTS_SUPPORTED)
     # We globally support tests, see if we support tests on this platform for ${gem_name}.Tests
-    if(PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED AND _sqlgencpp_orm_enabled)
-        # C++26 module test implementation (isolated from AzTest headers)
-        ly_add_target(
-            NAME ${gem_name}.TestImpl STATIC
-            NAMESPACE Gem
-            SCAN_FOR_MODULES
-            CXX_STANDARD 26
-            FILES_CMAKE
-                sqlgencpp_testimpl_files.cmake
-            TARGET_PROPERTIES
-                O3DE_PRIVATE_TARGET TRUE
-            INCLUDE_DIRECTORIES
-                PRIVATE
-                    Tests
-                    Source
-                    Include
-            BUILD_DEPENDENCIES
-                PRIVATE
-                    Gem::${gem_name}.ORM
-        )
+    if(PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED)
+        set(_sqlgencpp_test_extra_deps "")
+        if(_sqlgencpp_orm_enabled)
+            # C++26 module test implementation (isolated from AzTest headers)
+            ly_add_target(
+                NAME ${gem_name}.TestImpl STATIC
+                NAMESPACE Gem
+                SCAN_FOR_MODULES
+                CXX_STANDARD 26
+                FILES_CMAKE
+                    sqlgencpp_testimpl_files.cmake
+                TARGET_PROPERTIES
+                    O3DE_PRIVATE_TARGET TRUE
+                INCLUDE_DIRECTORIES
+                    PRIVATE
+                        Tests
+                        Source
+                        Include
+                BUILD_DEPENDENCIES
+                    PRIVATE
+                        Gem::${gem_name}.ORM
+            )
+            list(APPEND _sqlgencpp_test_extra_deps Gem::${gem_name}.TestImpl)
+        endif()
 
-        # We support ${gem_name}.Tests on this platform, add dependency on the Private Object target
+        # We support ${gem_name}.Tests on this platform (runs path-service tests even when ORM is disabled)
         ly_add_target(
             NAME ${gem_name}.Tests ${PAL_TRAIT_TEST_TARGET_TYPE}
             NAMESPACE Gem
             FILES_CMAKE
                 sqlgencpp_tests_files.cmake
+            COMPILE_DEFINITIONS
+                PRIVATE
+                    SQLGENCPP_ORM_ENABLED=$<IF:$<BOOL:${_sqlgencpp_orm_enabled}>,1,0>
             INCLUDE_DIRECTORIES
                 PRIVATE
                     Tests
@@ -268,8 +309,9 @@ if(PAL_TRAIT_BUILD_TESTS_SUPPORTED)
                     AZ::AzTest
                     AZ::AzFramework
                     Gem::${gem_name}.Private.Object
-                    Gem::${gem_name}.TestImpl
+                    ${_sqlgencpp_test_extra_deps}
         )
+        unset(_sqlgencpp_test_extra_deps)
 
         # Add ${gem_name}.Tests to googletest
         ly_add_googletest(
