@@ -83,6 +83,11 @@ namespace sqlgenCPP
     {
         if (auto* fileIO = AZ::IO::FileIOBase::GetInstance(); fileIO != nullptr)
         {
+            if (fileIO->GetAlias("@user@") == nullptr)
+            {
+                // FileIO is active but @user@ alias is unset: fail explicitly rather than creating "./@user@" or falling back to /tmp.
+                return {};
+            }
             if (auto resolved = fileIO->ResolvePath(AZ::IO::PathView("@user@/Database")); resolved.has_value())
             {
                 return AZStd::string(resolved->c_str());

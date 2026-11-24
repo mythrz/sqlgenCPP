@@ -8,6 +8,9 @@
 
 #include <AzTest/AzTest.h>
 
+#include <AzCore/IO/FileIO.h>
+#include <AzFramework/IO/LocalFileIO.h>
+
 #include <Clients/sqlgenCPPSystemComponent.h>
 #include <sqlgenCPP/sqlgenCPPBus.h>
 
@@ -40,6 +43,32 @@ namespace
         {
             std::error_code ec;
             std::filesystem::remove_all(dir, ec);
+        }
+    };
+
+    struct ScopedLocalFileIO
+    {
+        AZ::IO::FileIOBase* previous = nullptr;
+        AZ::IO::LocalFileIO localFileIO;
+
+        explicit ScopedLocalFileIO(const char* userAliasPath = nullptr)
+        {
+            previous = AZ::IO::FileIOBase::GetInstance();
+            AZ::IO::FileIOBase::SetInstance(nullptr);
+            AZ::IO::FileIOBase::SetInstance(&localFileIO);
+            if (userAliasPath != nullptr)
+            {
+                localFileIO.SetAlias("@user@", userAliasPath);
+            }
+        }
+
+        ~ScopedLocalFileIO()
+        {
+            AZ::IO::FileIOBase::SetInstance(nullptr);
+            if (previous != nullptr)
+            {
+                AZ::IO::FileIOBase::SetInstance(previous);
+            }
         }
     };
 
@@ -103,6 +132,44 @@ namespace
         EXPECT_EQ(rel, std::filesystem::path("UnitTests/slot1.db"));
     }
 
+    TEST(SqlgenCPPPathServiceTest, ResolvesUserAliasWhenFileIOIsActive)
+    {
+        ScopedTempDir userRoot("o3de_sqlgencpp_user_alias");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
+        sqlgenCPP::sqlgenCPPSystemComponent component;
+        auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
+        ASSERT_NE(requests, nullptr);
+
+        const AZStd::string defaultDir = requests->GetDefaultDatabaseDirectory(false);
+        ASSERT_FALSE(defaultDir.empty());
+        EXPECT_EQ(
+            std::filesystem::path(defaultDir.c_str()).lexically_normal(),
+            (userRoot.dir / "Database").lexically_normal());
+
+        const auto saveOutcome = requests->ResolveDatabasePath("Saves/slot1.db", true, false);
+        ASSERT_TRUE(saveOutcome.IsSuccess()) << saveOutcome.GetError().c_str();
+        const std::filesystem::path resolved(saveOutcome.GetValue().c_str());
+        EXPECT_EQ(resolved, (userRoot.dir / "Database" / "Saves" / "slot1.db").lexically_normal());
+        EXPECT_TRUE(std::filesystem::exists(resolved.parent_path()));
+
+        // Containment still holds under live FileIO
+        EXPECT_FALSE(requests->ResolveDatabasePath("../outside.db", true, false).IsSuccess());
+    }
+
+    TEST(SqlgenCPPPathServiceTest, NeverFallsBackToTempWhenLiveFileIOUnsetUserAlias)
+    {
+        ScopedLocalFileIO fileIO(nullptr);
+
+        sqlgenCPP::sqlgenCPPSystemComponent component;
+        auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
+        ASSERT_NE(requests, nullptr);
+
+        // Even with allowTempFallbackWhenNoFileIO=true, a live FileIO with unset @user@ MUST fail explicitly
+        EXPECT_TRUE(requests->GetDefaultDatabaseDirectory(true).empty());
+        EXPECT_FALSE(requests->ResolveDatabasePath("save.db", false, true).IsSuccess());
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // CodeFirstCppDB_sqlgen C++26 ORM Tests (Enabled when SQLGENCPP_ORM_ENABLED=1)
     ////////////////////////////////////////////////////////////////////////////
@@ -141,31 +208,45 @@ namespace
         EXPECT_TRUE(res.ok) << res.error;
     }
 
+    TEST(SqlgenCPPCodeFirstTest, TypedRead_PreservesEmbeddedNulBytes)
+    {
+        const auto res = sqlgenCPP::Tests::RunEmbeddedNulTextRoundTripTest(":memory:");
+        EXPECT_TRUE(res.ok) << res.error;
+    }
+
+    TEST(SqlgenCPPCodeFirstTest, BatchUpsert_RollsBackEntireBatchOnConstraintError)
+    {
+        const auto res = sqlgenCPP::Tests::RunBatchUpsertAtomicityTest(":memory:");
+        EXPECT_TRUE(res.ok) << res.error;
+    }
+
+    TEST(SqlgenCPPCodeFirstTest, SchemaMigration_UpgradesUserVersionTransactionally)
+    {
+        ScopedTempDir tempDir("o3de_sqlgencpp_migrate");
+        const auto dbFile = tempDir.dir / "migrated.db";
+
+        const auto res = sqlgenCPP::Tests::RunSchemaMigrationTest(dbFile.string());
+        EXPECT_TRUE(res.ok) << res.error;
+    }
+
     TEST(SqlgenCPPCodeFirstTest, SystemComponent_ResolvesDatabasePathAndPersists)
     {
+        ScopedTempDir userRoot("o3de_sqlgencpp_comp_persist");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
         sqlgenCPP::sqlgenCPPSystemComponent component;
         auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
         ASSERT_NE(requests, nullptr);
         ASSERT_TRUE(requests->IsCodeFirstOrmEnabled());
 
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        const AZStd::string relSubDir = AZStd::string::format("Tests/run_%lld", static_cast<long long>(stamp));
-        const AZStd::string relDbPath = AZStd::string::format("%s/component_test.db", relSubDir.c_str());
-
-        const auto pathOutcome = requests->ResolveDatabasePath(relDbPath, true, true);
+        const auto pathOutcome = requests->ResolveDatabasePath("Saves/component_test.db", true, false);
         ASSERT_TRUE(pathOutcome.IsSuccess()) << pathOutcome.GetError().c_str();
 
         const std::filesystem::path dbPath(pathOutcome.GetValue().c_str());
-        const std::filesystem::path baseDir(requests->GetDefaultDatabaseDirectory(true).c_str());
-        const std::filesystem::path rel = dbPath.lexically_relative(baseDir);
-        EXPECT_FALSE(rel.empty());
-        EXPECT_NE(*rel.begin(), "..");
+        const std::filesystem::path expectedDir = (userRoot.dir / "Database" / "Saves").lexically_normal();
+        EXPECT_EQ(dbPath.parent_path(), expectedDir);
 
         const auto res = sqlgenCPP::Tests::RunReopenPersistenceTest(dbPath.string());
-
-        std::error_code ec;
-        std::filesystem::remove_all(dbPath.parent_path(), ec);
-
         EXPECT_TRUE(res.ok) << res.error;
     }
 

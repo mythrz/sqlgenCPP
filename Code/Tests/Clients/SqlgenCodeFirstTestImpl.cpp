@@ -65,7 +65,7 @@ namespace sqlgenCPP::Tests
         template <typename DbSetT>
         std::expected<void, std::string> ExpectCount(const DbSetT& set, std::size_t expected, std::string_view label)
         {
-            const auto res = set.query().try_count();
+            const auto res = set.try_count();
             if (!res)
             {
                 return std::unexpected(std::string(label) + " try_count failed: " + res.error().to_string());
@@ -369,6 +369,154 @@ namespace sqlgenCPP::Tests
                 if (!found || !found->has_value() || (*found)->display_name != "Persisted" || (*found)->level != 42)
                 {
                     return Fail("Persisted player not found after reopening SQLite database");
+                }
+            }
+            return Ok();
+        });
+    }
+
+    DbTestOutcome RunEmbeddedNulTextRoundTripTest(const std::string& dbPath)
+    {
+        return RunGuarded([&]() -> DbTestOutcome {
+            auto conn = DAL::SQLiteConnection::connect(dbPath);
+            if (!conn)
+            {
+                return Fail("connect failed: " + conn.error().to_string());
+            }
+            GameTestDbContext db(*conn);
+            if (auto res = db.ensure_created(); !res)
+            {
+                return Fail("ensure_created failed: " + res.error().to_string());
+            }
+
+            const std::string payload("A\0B", 3);
+            auto created = db.players.add_returning(
+                Player{ .id = 0, .handle = "@nul_test", .display_name = payload, .level = 7 });
+            if (!created)
+            {
+                return Fail("add_returning with embedded NUL failed: " + created.error().to_string());
+            }
+
+            auto found = db.players.try_find(created->id);
+            if (!found || !found->has_value())
+            {
+                return Fail("try_find failed for embedded NUL row");
+            }
+            if ((*found)->display_name.size() != 3 || (*found)->display_name != payload)
+            {
+                return Fail(
+                    "Embedded NUL TEXT was truncated: expected 3 bytes, got " +
+                    std::to_string((*found)->display_name.size()));
+            }
+            return Ok();
+        });
+    }
+
+    DbTestOutcome RunBatchUpsertAtomicityTest(const std::string& dbPath)
+    {
+        return RunGuarded([&]() -> DbTestOutcome {
+            struct [[=DAL::Schema::table{ std::define_static_string("ManualCatalog") }]] ManualItem
+            {
+                [[=DAL::Schema::primary_key{ false }]] std::int32_t id = 0;
+                [[=DAL::Schema::unique{}]] std::string code;
+                std::string name;
+            };
+
+            struct CatalogDbContext : DAL::DbContextBase<DAL::SQLiteConnection>
+            {
+                Set<ManualItem> catalog{ this };
+                explicit CatalogDbContext(std::shared_ptr<DAL::SQLiteConnection> c)
+                    : DAL::DbContextBase<DAL::SQLiteConnection>(std::move(c))
+                {
+                }
+            };
+
+            auto conn = DAL::SQLiteConnection::connect(dbPath);
+            if (!conn)
+            {
+                return Fail("connect failed: " + conn.error().to_string());
+            }
+            CatalogDbContext db(*conn);
+            if (auto res = db.ensure_created(); !res)
+            {
+                return Fail("ensure_created failed: " + res.error().to_string());
+            }
+
+            // Two-row batch where row 2 violates the UNIQUE constraint on 'code'
+            const std::vector<ManualItem> batch = {
+                ManualItem{ .id = 1, .code = "DUP_CODE", .name = "First" },
+                ManualItem{ .id = 2, .code = "DUP_CODE", .name = "Second" }
+            };
+
+            auto upsertRes = db.catalog.upsert_range(batch);
+            if (upsertRes.has_value())
+            {
+                return Fail("Expected upsert_range to fail on duplicate unique code");
+            }
+
+            if (auto chk = ExpectCount(db.catalog, 0, "catalog after failed upsert_range"); !chk)
+            {
+                return Fail(chk.error());
+            }
+            return Ok();
+        });
+    }
+
+    DbTestOutcome RunSchemaMigrationTest(const std::string& dbPath)
+    {
+        return RunGuarded([&]() -> DbTestOutcome {
+            {
+                auto conn = DAL::SQLiteConnection::connect(dbPath);
+                if (!conn)
+                {
+                    return Fail("connect (migrate) failed: " + conn.error().to_string());
+                }
+                GameTestDbContext db(*conn);
+
+                auto initialVer = db.try_user_version();
+                if (!initialVer || *initialVer != 0)
+                {
+                    return Fail("Expected initial PRAGMA user_version == 0");
+                }
+
+                auto migRes = db.migrate_to(2, [&](std::int32_t fromVer, std::int32_t toVer) -> std::expected<void, Core::DbError> {
+                    if (fromVer != 0 || toVer != 2)
+                    {
+                        return std::unexpected(Core::DbError::unknown("Unexpected migration version arguments"));
+                    }
+                    return (*conn)->execute_prepared("ALTER TABLE Players ADD COLUMN bio TEXT NOT NULL DEFAULT '';");
+                });
+                if (!migRes)
+                {
+                    return Fail("migrate_to(2) failed: " + migRes.error().to_string());
+                }
+
+                auto verAfter = db.try_user_version();
+                if (!verAfter || *verAfter != 2)
+                {
+                    return Fail("Expected PRAGMA user_version == 2 after migration");
+                }
+                (*conn)->close();
+            }
+
+            // Reopen from disk and verify schema version & migrated column persisted
+            {
+                auto conn = DAL::SQLiteConnection::connect(dbPath);
+                if (!conn)
+                {
+                    return Fail("connect (verify) failed: " + conn.error().to_string());
+                }
+                GameTestDbContext db(*conn);
+
+                auto ver = db.try_user_version();
+                if (!ver || *ver != 2)
+                {
+                    return Fail("Expected persisted PRAGMA user_version == 2 on reopen");
+                }
+                auto colCheck = db.query_rows("SELECT bio FROM Players LIMIT 1;");
+                if (!colCheck)
+                {
+                    return Fail("Migrated column 'bio' not queryable after reopen: " + colCheck.error().to_string());
                 }
             }
             return Ok();
