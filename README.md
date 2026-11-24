@@ -2,7 +2,7 @@
 
 A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integrates [`CodeFirstCppDB_sqlgen`](https://github.com/mythrz/CodeFirstCppDB_sqlgen) — a C++26 module-based, reflection-driven Code-First ORM built on [`sqlgen`](https://github.com/munich-data-engineering/sqlgen) and [`reflect-cpp`](https://github.com/getml/reflect-cpp) — into O3DE, backed by O3DE's bundled **SQLite3 (`3rdParty::sqlite`)**.
 
-> **Maturity Note:** Currently targeted at **Linux (`x86_64`) GCC 16+ prototyping and evaluation**. Before using the pinned ORM for durable production player saves, track the open `CodeFirstCppDB_sqlgen` / upstream `sqlgen` hardening work (typed SQLite iterator error/NUL handling, batch write atomicity, and versioned migrations).
+> **Maturity Note:** Currently targeted at **Linux (`x86_64`) GCC 16+ C++26 evaluation and game prototyping**. The pinned [`CodeFirstCppDB_sqlgen@8852620`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/88526202f9bce79e42ab091f533cbfd8c13563ef) submodule includes the strict prepared-statement typed SQLite reader, RAII transactional writes/batches, connection/tracker lifetime fixes, and transactional `PRAGMA user_version` schema migrations (`migrate_to`). This repository does not yet run automated GitHub Actions CI for the full O3DE engine build.
 
 ---
 
@@ -19,8 +19,8 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
   - Preserves `":memory:"`.
   - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`).
 - **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
-  - Path-service and `sqlgenCPPSystemComponent` tests **always** build and run (including with `SQLGENCPP_ORM_MODE=OFF`).
-  - When ORM is enabled, also runs C++26 tests covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, and `SystemComponent` path + persistence.
+  - Path-service and `sqlgenCPPSystemComponent` tests (5 tests, including live `AZ::IO::LocalFileIO` `@user@` alias and unset-alias failure checks) **always** build and run (even with `SQLGENCPP_ORM_MODE=OFF`).
+  - When ORM is enabled, also runs 9 C++26 tests covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
 
 ---
 
@@ -28,7 +28,8 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 
 ### Full C++26 ORM Mode (`SQLGENCPP_ORM_MODE=REQUIRED` or `AUTO`)
 - **O3DE Engine:** Requires an O3DE build with opt-in C++20 module support (`cmake/CxxModules.cmake`, `SCAN_FOR_MODULES`, and `PRIVATE` `CXX_STANDARD` in `ly_add_target`).
-  - **Tested Fork & Commit:** [`mythrz/o3de`](https://github.com/mythrz/o3de) (`development` @ [`ff890e8e8a`](https://github.com/mythrz/o3de/commit/ff890e8e8a1deb413de465a058e9d304e029dc64))
+  - **Tested Engine Fork & Commit:** [`mythrz/o3de`](https://github.com/mythrz/o3de) (`development` @ [`ff890e8e8a`](https://github.com/mythrz/o3de/commit/ff890e8e8a1deb413de465a058e9d304e029dc64))
+  - **Tested ORM Submodule Pin:** [`mythrz/CodeFirstCppDB_sqlgen`](https://github.com/mythrz/CodeFirstCppDB_sqlgen) (`main` @ [`8852620`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/88526202f9bce79e42ab091f533cbfd8c13563ef))
   - *(Note: Upstream `o3de/o3de` `development` does not yet include `cmake/CxxModules.cmake` or `ly_add_target` module arguments. Against unmodified upstream O3DE, `SQLGENCPP_ORM_MODE=AUTO` builds the C++20 path service only and `SQLGENCPP_ORM_MODE=REQUIRED` fails configure with the missing trait names.)*
 - **Compiler:** **GCC 16.1+** (tested with GCC 16.2.1 on Linux `x86_64`).
 - **Build System:** **CMake 4.5+** and **Ninja** (`Ninja` or `Ninja Multi-Config`).
