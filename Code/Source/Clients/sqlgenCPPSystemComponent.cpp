@@ -132,6 +132,11 @@ namespace sqlgenCPP
         {
             return AZ::Failure(AZStd::string("Database path must be relative to the database directory (absolute paths are rejected)."));
         }
+        if (relativeDbPath.back() == '/' || relativeDbPath.back() == '\\' ||
+            !inputPath.has_filename() || inputPath.filename() == "." || inputPath.filename() == "..")
+        {
+            return AZ::Failure(AZStd::string("Database path must name a file, not a directory."));
+        }
 
         const AZStd::string baseDirStr = GetDefaultDatabaseDirectory(allowTempFallbackWhenNoFileIO);
         if (baseDirStr.empty())
@@ -143,25 +148,35 @@ namespace sqlgenCPP
             std::filesystem::path(std::string_view(baseDirStr.data(), baseDirStr.size())).lexically_normal();
         const std::filesystem::path resolvedPath = (baseDir / inputPath).lexically_normal();
 
-        if (!IsStrictlyContainedInBase(baseDir, resolvedPath))
+        if (!IsStrictlyContainedInBase(baseDir, resolvedPath) || !resolvedPath.has_filename())
         {
             return AZ::Failure(AZStd::string("Database path escapes the configured database directory."));
         }
 
-        if (createParentDirectory && resolvedPath.has_parent_path())
+        // Resolve any existing symlinks along the path to prevent symlink-based escapes
+        std::error_code canonBaseEc;
+        std::error_code canonPathEc;
+        const std::filesystem::path canonicalBase = std::filesystem::weakly_canonical(baseDir, canonBaseEc);
+        const std::filesystem::path canonicalResolved = std::filesystem::weakly_canonical(resolvedPath, canonPathEc);
+        if (canonBaseEc || canonPathEc || !IsStrictlyContainedInBase(canonicalBase, canonicalResolved))
+        {
+            return AZ::Failure(AZStd::string("Database path escapes the configured database directory via symlink."));
+        }
+
+        if (createParentDirectory && canonicalResolved.has_parent_path())
         {
             std::error_code ec;
-            std::filesystem::create_directories(resolvedPath.parent_path(), ec);
+            std::filesystem::create_directories(canonicalResolved.parent_path(), ec);
             if (ec)
             {
                 return AZ::Failure(AZStd::string::format(
                     "Failed to create database parent directory '%s': %s",
-                    resolvedPath.parent_path().string().c_str(),
+                    canonicalResolved.parent_path().string().c_str(),
                     ec.message().c_str()));
             }
         }
 
-        return AZ::Success(AZStd::string(resolvedPath.string().c_str()));
+        return AZ::Success(AZStd::string(canonicalResolved.string().c_str()));
     }
 
     bool sqlgenCPPSystemComponent::IsCodeFirstOrmEnabled() const

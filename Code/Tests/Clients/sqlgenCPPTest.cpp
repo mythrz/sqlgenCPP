@@ -89,7 +89,7 @@ namespace
 #endif
     }
 
-    TEST(SqlgenCPPPathServiceTest, RejectsEmptyAbsoluteAndTraversalPaths)
+    TEST(SqlgenCPPPathServiceTest, RejectsEmptyAbsoluteDirectoryAndTraversalPaths)
     {
         sqlgenCPP::sqlgenCPPSystemComponent component;
         auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
@@ -100,6 +100,61 @@ namespace
         EXPECT_FALSE(requests->ResolveDatabasePath("../escape.db", false, true).IsSuccess());
         EXPECT_FALSE(requests->ResolveDatabasePath("sub/../../escape.db", false, true).IsSuccess());
         EXPECT_FALSE(requests->ResolveDatabasePath(".", false, true).IsSuccess());
+        EXPECT_FALSE(requests->ResolveDatabasePath("Saves/", false, true).IsSuccess());
+        EXPECT_FALSE(requests->ResolveDatabasePath("Saves/.", false, true).IsSuccess());
+    }
+
+    TEST(SqlgenCPPPathServiceTest, RejectsSymlinkEscapeOutsideUserDatabaseDir)
+    {
+        ScopedTempDir userRoot("o3de_sqlgencpp_sym_user");
+        ScopedTempDir outsideDir("o3de_sqlgencpp_sym_outside");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
+        std::error_code ec;
+        const auto dbDir = userRoot.dir / "Database";
+        std::filesystem::create_directories(dbDir, ec);
+        ASSERT_FALSE(ec);
+
+        const auto escapeLink = dbDir / "escape_link";
+        std::filesystem::create_directory_symlink(outsideDir.dir, escapeLink, ec);
+        ASSERT_FALSE(ec);
+
+        sqlgenCPP::sqlgenCPPSystemComponent component;
+        auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
+        ASSERT_NE(requests, nullptr);
+
+        EXPECT_FALSE(requests->ResolveDatabasePath("escape_link/evil.db", true, false).IsSuccess());
+        EXPECT_FALSE(std::filesystem::exists(outsideDir.dir / "evil.db"));
+    }
+
+    TEST(SqlgenCPPPathServiceTest, EBusBroadcastsWhenComponentActivated)
+    {
+        struct TestableSystemComponent : sqlgenCPP::sqlgenCPPSystemComponent
+        {
+            using sqlgenCPPSystemComponent::Activate;
+            using sqlgenCPPSystemComponent::Deactivate;
+        };
+
+        ScopedTempDir userRoot("o3de_sqlgencpp_ebus");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
+        TestableSystemComponent component;
+        component.Activate();
+
+        AZ::Outcome<AZStd::string, AZStd::string> outcome = AZ::Failure(AZStd::string("Not handled"));
+        sqlgenCPP::sqlgenCPPRequestBus::BroadcastResult(
+            outcome,
+            &sqlgenCPP::sqlgenCPPRequests::ResolveDatabasePath,
+            AZStd::string_view("Saves/ebus_test.db"),
+            true,
+            false);
+
+        component.Deactivate();
+
+        ASSERT_TRUE(outcome.IsSuccess()) << outcome.GetError().c_str();
+        const std::filesystem::path expected =
+            std::filesystem::weakly_canonical(userRoot.dir / "Database" / "Saves" / "ebus_test.db");
+        EXPECT_EQ(std::filesystem::path(outcome.GetValue().c_str()), expected);
     }
 
     TEST(SqlgenCPPPathServiceTest, AllowsMemoryAndRequiresExplicitTempFallbackWithoutFileIO)

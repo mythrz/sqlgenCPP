@@ -19,7 +19,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
   - Preserves `":memory:"`.
   - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`).
 - **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
-  - Path-service and `sqlgenCPPSystemComponent` tests (5 tests, including live `AZ::IO::LocalFileIO` `@user@` alias and unset-alias failure checks) **always** build and run (even with `SQLGENCPP_ORM_MODE=OFF`).
+  - Path-service and `sqlgenCPPSystemComponent` tests (7 tests, including live `AZ::IO::LocalFileIO` `@user@` alias, unset-alias failure, symlink-escape rejection, directory-path rejection, and `EBus` activation checks) **always** build and run (even with `SQLGENCPP_ORM_MODE=OFF`).
   - When ORM is enabled, also runs 9 C++26 tests covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
 
 ---
@@ -35,7 +35,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 - **Build System:** **CMake 4.5+** and **Ninja** (`Ninja` or `Ninja Multi-Config`).
 - **CMake Options:**
   - `SQLGENCPP_ORM_MODE=AUTO|REQUIRED|OFF` (default: `AUTO`)
-  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces are empty so `libstdc++exp.a` is not linked).
+  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces return empty strings).
   - `SQLGENCPP_CODEFIRST_DIR=<path>` (default: bundled submodule `Code/External/CodeFirstCppDB_sqlgen`).
 
 ---
