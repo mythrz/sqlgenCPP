@@ -1,0 +1,88 @@
+name: CMake Contracts & Hygiene
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  cmake-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sqlgenCPP
+        uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Validate gem.json
+        run: python3 -m json.tool gem.json > /dev/null
+
+      - name: Check repository hygiene (no hardcoded local home paths)
+        run: |
+          if git grep -nE '/home/[a-zA-Z0-9._-]+/' -- ':!.github/workflows/cmake-contracts.yml'; then
+            echo "ERROR: Hardcoded /home/<user>/ path found in tracked files."
+            exit 1
+          fi
+
+      - name: Run reduced-host CMake contract tests (AUTO, OFF, REQUIRED)
+        run: |
+          set -euo pipefail
+          HARNESS_DIR="${RUNNER_TEMP}/sqlgencpp_reduced_host"
+          rm -rf "${HARNESS_DIR}"
+          mkdir -p "${HARNESS_DIR}"
+
+          cat <<EOF > "${HARNESS_DIR}/CMakeLists.txt"
+          cmake_minimum_required(VERSION 3.28)
+          project(sqlgencpp_reduced_host LANGUAGES C CXX)
+          set(PAL_PLATFORM_NAME "Linux")
+          set(PAL_PLATFORM_NAME_LOWERCASE "linux")
+          set(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED TRUE)
+          set(PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED TRUE)
+          set(PAL_TRAIT_BUILD_HOST_TOOLS FALSE)
+          set(PAL_TRAIT_BUILD_TESTS_SUPPORTED FALSE)
+          set(PAL_TRAIT_MONOLITHIC_DRIVEN_MODULE_TYPE STATIC)
+          set(gem_name "sqlgenCPP")
+          set(gem_version "1.0.0")
+          set(gem_path "${GITHUB_WORKSPACE}")
+          set(gem_restricted_path "")
+          set(gem_parent_relative_path "")
+
+          function(o3de_pal_dir out_var dir)
+              set(\${out_var} "\${dir}" PARENT_SCOPE)
+          endfunction()
+          function(ly_add_target)
+          endfunction()
+          function(ly_add_source_properties)
+          endfunction()
+          function(ly_create_alias)
+          endfunction()
+          function(o3de_add_variant_dependencies_for_gem_dependencies)
+          endfunction()
+          function(ly_add_googletest)
+          endfunction()
+
+          add_subdirectory("${GITHUB_WORKSPACE}/Code" sqlgenCPP_code)
+          EOF
+
+          echo "=== Contract 1: SQLGENCPP_ORM_MODE=OFF ==="
+          cmake -S "${HARNESS_DIR}" -B "${HARNESS_DIR}/build_off" -G "Ninja Multi-Config" \
+            -DSQLGENCPP_ORM_MODE=OFF
+
+          echo "=== Contract 2: SQLGENCPP_ORM_MODE=AUTO without 3rdParty::sqlite ==="
+          AUTO_LOG="${HARNESS_DIR}/auto.log"
+          cmake -S "${HARNESS_DIR}" -B "${HARNESS_DIR}/build_auto" -G "Ninja Multi-Config" \
+            -DSQLGENCPP_ORM_MODE=AUTO | tee "${AUTO_LOG}"
+          grep -q "3rdParty::sqlite" "${AUTO_LOG}"
+
+          echo "=== Contract 3: SQLGENCPP_ORM_MODE=REQUIRED without 3rdParty::sqlite ==="
+          REQ_LOG="${HARNESS_DIR}/req.log"
+          if cmake -S "${HARNESS_DIR}" -B "${HARNESS_DIR}/build_req" -G "Ninja Multi-Config" \
+            -DSQLGENCPP_ORM_MODE=REQUIRED > "${REQ_LOG}" 2>&1; then
+            cat "${REQ_LOG}"
+            echo "ERROR: SQLGENCPP_ORM_MODE=REQUIRED unexpectedly succeeded!"
+            exit 1
+          fi
+          cat "${REQ_LOG}"
+          grep -q "3rdParty::sqlite" "${REQ_LOG}"
