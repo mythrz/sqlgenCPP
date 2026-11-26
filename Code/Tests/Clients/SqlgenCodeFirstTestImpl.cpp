@@ -9,8 +9,8 @@
 #include "Clients/SqlgenCodeFirstTestImpl.h"
 
 import std;
-import core;
-import dal;
+import codefirst.core;
+import codefirst.dal;
 
 namespace sqlgenCPP::Tests
 {
@@ -39,10 +39,24 @@ namespace sqlgenCPP::Tests
             std::int32_t quantity = 1;
         };
 
+        struct [[=DAL::Schema::table{ std::define_static_string("PlayerItemOwnership") }]] PlayerItemOwnership
+        {
+            [[=DAL::Schema::primary_key{ false }]]
+            [[=DAL::Schema::references<Player>{ std::define_static_string("id") }]]
+            std::int32_t player_id = 0;
+
+            [[=DAL::Schema::primary_key{ false }]]
+            [[=DAL::Schema::references<Item>{ std::define_static_string("id") }]]
+            std::int32_t item_id = 0;
+
+            std::int32_t quantity = 1;
+        };
+
         struct GameTestDbContext : DAL::DbContextBase<DAL::SQLiteConnection>
         {
             // Declared before Player/Item to exercise topological FK table creation order
             Set<InventoryEntry> inventory{ this };
+            Set<PlayerItemOwnership> ownership{ this };
             Set<Player> players{ this };
             Set<Item> items{ this };
 
@@ -519,6 +533,90 @@ namespace sqlgenCPP::Tests
                     return Fail("Migrated column 'bio' not queryable after reopen: " + colCheck.error().to_string());
                 }
             }
+            return Ok();
+        });
+    }
+
+    DbTestOutcome RunCompositeFkUpsertTest(const std::string& dbPath)
+    {
+        return RunGuarded([&]() -> DbTestOutcome {
+            auto conn = DAL::SQLiteConnection::connect(dbPath);
+            if (!conn)
+            {
+                return Fail("connect failed: " + conn.error().to_string());
+            }
+            GameTestDbContext db(*conn);
+            if (auto res = db.ensure_created(); !res)
+            {
+                return Fail("ensure_created failed: " + res.error().to_string());
+            }
+
+            auto p1 = db.players.add_returning(Player{ .id = 0, .handle = "@p1", .display_name = "Player 1", .level = 1 });
+            auto p2 = db.players.add_returning(Player{ .id = 0, .handle = "@p2", .display_name = "Player 2", .level = 2 });
+            auto i1 = db.items.add_returning(Item{ .id = 0, .code = "ITM_1", .name = "Potion" });
+            auto i2 = db.items.add_returning(Item{ .id = 0, .code = "ITM_2", .name = "Elixir" });
+            if (!p1 || !p2 || !i1 || !i2)
+            {
+                return Fail("Failed to seed parent rows for composite-FK upsert test");
+            }
+
+            // 1. Single-row upsert insert + conflict update on composite (PK + FK) key
+            if (auto r = db.ownership.upsert(PlayerItemOwnership{ .player_id = p1->id, .item_id = i1->id, .quantity = 3 }); !r)
+            {
+                return Fail("Initial composite-FK upsert failed: " + r.error().to_string());
+            }
+            if (auto r = db.ownership.upsert(PlayerItemOwnership{ .player_id = p1->id, .item_id = i1->id, .quantity = 10 }); !r)
+            {
+                return Fail("Conflict-update composite-FK upsert failed: " + r.error().to_string());
+            }
+            if (auto chk = ExpectCount(db.ownership, 1, "ownership after single upsert"); !chk)
+            {
+                return Fail(chk.error());
+            }
+            const auto foundSingle = db.ownership.try_find(Core::CompositeKey<std::int32_t, std::int32_t>{ p1->id, i1->id });
+            if (!foundSingle || !foundSingle->has_value() || (*foundSingle)->quantity != 10)
+            {
+                return Fail("Expected updated quantity == 10 after single composite-FK upsert");
+            }
+
+            // 2. Batch upsert_range mixing update of existing key + inserts of new composite keys
+            std::vector<PlayerItemOwnership> batch{
+                PlayerItemOwnership{ .player_id = p1->id, .item_id = i1->id, .quantity = 25 },
+                PlayerItemOwnership{ .player_id = p1->id, .item_id = i2->id, .quantity = 4 },
+                PlayerItemOwnership{ .player_id = p2->id, .item_id = i1->id, .quantity = 7 },
+            };
+            if (auto r = db.ownership.upsert_range(batch); !r)
+            {
+                return Fail("Batch composite-FK upsert_range failed: " + r.error().to_string());
+            }
+            if (auto chk = ExpectCount(db.ownership, 3, "ownership after batch upsert"); !chk)
+            {
+                return Fail(chk.error());
+            }
+
+            const auto checkRow = [&](std::int32_t pid, std::int32_t iid, std::int32_t expectedQty) -> bool {
+                const auto f = db.ownership.try_find(Core::CompositeKey<std::int32_t, std::int32_t>{ pid, iid });
+                return f && f->has_value() && (*f)->quantity == expectedQty;
+            };
+            if (!checkRow(p1->id, i1->id, 25) || !checkRow(p1->id, i2->id, 4) || !checkRow(p2->id, i1->id, 7))
+            {
+                return Fail("Batch composite-FK upsert_range did not persist expected quantities");
+            }
+
+            // 3. Batch upsert_range atomicity: FK violation on second row must roll back first row's update
+            std::vector<PlayerItemOwnership> badBatch{
+                PlayerItemOwnership{ .player_id = p1->id, .item_id = i1->id, .quantity = 99 },
+                PlayerItemOwnership{ .player_id = 99999, .item_id = i1->id, .quantity = 1 },
+            };
+            if (auto r = db.ownership.upsert_range(badBatch); r.has_value())
+            {
+                return Fail("Expected batch composite-FK upsert_range to fail on invalid foreign key");
+            }
+            if (!checkRow(p1->id, i1->id, 25))
+            {
+                return Fail("Failed batch composite-FK upsert_range leaked partial update (expected quantity == 25)");
+            }
+
             return Ok();
         });
     }

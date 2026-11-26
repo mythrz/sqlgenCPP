@@ -25,5 +25,6 @@ namespace sqlgenCPP::Tests
     DbTestOutcome RunReopenPersistenceTest(const std::string& dbPath);
     DbTestOutcome RunEmbeddedNulTextRoundTripTest(const std::string& dbPath);
     DbTestOutcome RunBatchUpsertAtomicityTest(const std::string& dbPath);
+    DbTestOutcome RunCompositeFkUpsertTest(const std::string& dbPath);
     DbTestOutcome RunSchemaMigrationTest(const std::string& dbPath);
 } // namespace sqlgenCPP::Tests

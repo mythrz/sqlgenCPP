@@ -303,6 +303,12 @@ namespace
         EXPECT_TRUE(res.ok) << res.error;
     }
 
+    TEST(SqlgenCPPCodeFirstTest, CompositeFkUpsert_SingleAndBatchUpdateExistingRows)
+    {
+        const auto res = sqlgenCPP::Tests::RunCompositeFkUpsertTest(":memory:");
+        EXPECT_TRUE(res.ok) << res.error;
+    }
+
     TEST(SqlgenCPPCodeFirstTest, SchemaMigration_UpgradesUserVersionTransactionally)
     {
         ScopedTempDir tempDir("o3de_sqlgencpp_migrate");

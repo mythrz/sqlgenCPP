@@ -12,8 +12,8 @@
 #include "SaveFacade.h"
 
 import std;
-import core;
-import dal;
+import codefirst.core;
+import codefirst.dal;
 
 namespace MyGame::Persistence
 {

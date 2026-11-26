@@ -2,14 +2,14 @@
 
 A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integrates [`CodeFirstCppDB_sqlgen`](https://github.com/mythrz/CodeFirstCppDB_sqlgen) — a C++26 module-based, reflection-driven Code-First ORM built on [`sqlgen`](https://github.com/munich-data-engineering/sqlgen) and [`reflect-cpp`](https://github.com/getml/reflect-cpp) — into O3DE, backed by O3DE's bundled **SQLite3 (`3rdParty::sqlite`)**.
 
-> **Maturity Note:** Currently targeted at **Linux (`x86_64`) GCC 16.1+ C++26 evaluation and game prototyping**. The pinned [`CodeFirstCppDB_sqlgen@8852620`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/88526202f9bce79e42ab091f533cbfd8c13563ef) submodule includes the strict prepared-statement typed SQLite reader, RAII transactional writes/batches, connection/tracker lifetime fixes, and transactional `PRAGMA user_version` schema migrations (`migrate_to`). This repository does not yet run automated GitHub Actions CI for the full O3DE engine build.
+> **Maturity Note:** Currently targeted at **Linux (`x86_64`) GCC 16.1+ C++26 evaluation and game prototyping**. The pinned [`CodeFirstCppDB_sqlgen@affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) submodule includes project-qualified `codefirst.core` / `codefirst.dal` modules, the streaming strict prepared-statement SQLite reader, range-checked keys & tracked-PK guards, `INSERT ... RETURNING` hydration, `BEGIN IMMEDIATE` schema migrations, composite-PK + FK upserts, and gated `libstdc++exp` linkage. GitHub Actions CI runs reduced-host CMake contract & hygiene checks; full O3DE engine + `AzTestRunner` pairings are tracked in the dated matrix below.
 
 ---
 
 ## Features
 
 - **Injected Engine SQLite (`3rdParty::sqlite`):** Verifies that `3rdParty::sqlite` exists before configuring `CodeFirstCppDB_sqlgen`, then passes `CODEFIRST_SQLITE_TARGET=3rdParty::sqlite` so the ORM links O3DE's bundled static SQLite3 archive rather than pulling a separate system `libsqlite3.so`. *(Verify both dynamic `ldd` and static symbol/link-map output on your final executable/Editor if other third-party Gems also ship SQLite.)*
-- **Clean C++20 / C++26 Target Boundary:** Exposes `Gem::sqlgenCPP.ORM` for opt-in C++26 module targets (`import std; import core; import dal;`) while keeping standard O3DE components, `Editor`, and `AzTest` harnesses on C++20 (`-fno-exceptions`).
+- **Clean C++20 / C++26 Target Boundary:** Exposes `Gem::sqlgenCPP.ORM` for opt-in C++26 module targets (`import std; import codefirst.core; import codefirst.dal;`) while keeping standard O3DE components, `Editor`, and `AzTest` harnesses on C++20 (`-fno-exceptions`).
 - **Explicit ORM Build Modes (`SQLGENCPP_ORM_MODE`):**
   - `AUTO` *(default)*: Enables `Gem::sqlgenCPP.ORM` when all prerequisites (including `3rdParty::sqlite`, O3DE module traits, GCC 16.1+, and initialized submodules) are present; logs exact missing prerequisites and falls back to the path service otherwise.
   - `REQUIRED`: Fails CMake configure with a clear `FATAL_ERROR` listing any missing prerequisites.
@@ -21,7 +21,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 - **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
   - Built when O3DE tests are enabled (`PAL_TRAIT_BUILD_TESTS_SUPPORTED=TRUE`) on a test-supported platform (currently **Linux**, where `PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED=TRUE`).
   - Path-service and `sqlgenCPPSystemComponent` tests (8 tests: compile-time ORM flag, lexical/directory rejection, symlink-escape rejection, existing-directory rejection, `EBus` activation, headless `:memory:`/temp fallback policy, live `AZ::IO::LocalFileIO` `@user@` alias, and unset-alias failure) build and run regardless of `SQLGENCPP_ORM_MODE` (including `OFF`).
-  - When ORM is enabled, also runs 9 C++26 tests (17 tests total) covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
+  - When ORM is enabled, also runs 10 C++26 tests (18 tests total) covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, composite-PK + FK single-row and batch upserts, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
 
 ---
 
@@ -34,14 +34,14 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 - **Build System:** **CMake 4.5+** and **Ninja** (`Ninja` or `Ninja Multi-Config`).
 - **CMake Options:**
   - `SQLGENCPP_ORM_MODE=AUTO|REQUIRED|OFF` (default: `AUTO`)
-  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces return empty strings).
+  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces return empty strings and `libstdc++exp.a` is not linked).
   - `SQLGENCPP_CODEFIRST_DIR=<path>` (default: bundled submodule `Code/External/CodeFirstCppDB_sqlgen`).
 
 ### Verified Pairings (Dated)
 
 | Date | Platform / Toolchain | O3DE Engine Commit | `CodeFirstCppDB_sqlgen` Pin | Modes & Verification |
 |---|---|---|---|---|
-| 2026-11-26 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`8852620`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/88526202f9bce79e42ab091f533cbfd8c13563ef) | `REQUIRED`: 17/17 `sqlgenCPP.Tests` + `MinimalGameConsumer` write/close/reopen passed; 0 dynamic `libsqlite3.so` (`ldd`) and single static `sqlite3_open_v2` (`nm`). `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host (no `3rdParty::sqlite`): `AUTO` fell back cleanly, `REQUIRED` failed with missing target diagnostic. |
+| 2026-11-26 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`: 18/18 `sqlgenCPP.Tests` (including composite-PK + FK single/batch upsert) passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`), and `libstdc++exp.a` not linked when `SQLGENCPP_ENABLE_STACKTRACE=OFF`. `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host (no `3rdParty::sqlite`): `AUTO` fell back cleanly, `REQUIRED` failed with `3rdParty::sqlite` diagnostic. |
 
 ---
 
