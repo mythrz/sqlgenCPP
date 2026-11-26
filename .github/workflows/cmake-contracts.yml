@@ -40,8 +40,9 @@ jobs:
           set(PAL_PLATFORM_NAME_LOWERCASE "linux")
           set(PAL_TRAIT_BUILD_CXX_MODULES_SUPPORTED TRUE)
           set(PAL_TRAIT_BUILD_CXX_IMPORT_STD_SUPPORTED TRUE)
-          set(PAL_TRAIT_BUILD_HOST_TOOLS FALSE)
-          set(PAL_TRAIT_BUILD_TESTS_SUPPORTED FALSE)
+          set(PAL_TRAIT_BUILD_HOST_TOOLS TRUE)
+          set(PAL_TRAIT_BUILD_TESTS_SUPPORTED TRUE)
+          set(PAL_TRAIT_TEST_TARGET_TYPE MODULE)
           set(PAL_TRAIT_MONOLITHIC_DRIVEN_MODULE_TYPE STATIC)
           set(gem_name "sqlgenCPP")
           set(gem_version "1.0.0")
@@ -86,3 +87,14 @@ jobs:
           fi
           cat "${REQ_LOG}"
           grep -q "3rdParty::sqlite" "${REQ_LOG}"
+
+          echo "=== Contract 4: Invalid SQLGENCPP_ORM_MODE ==="
+          INV_LOG="${HARNESS_DIR}/invalid.log"
+          if cmake -S "${HARNESS_DIR}" -B "${HARNESS_DIR}/build_invalid" -G "Ninja Multi-Config" \
+            -DSQLGENCPP_ORM_MODE=INVALID > "${INV_LOG}" 2>&1; then
+            cat "${INV_LOG}"
+            echo "ERROR: Invalid SQLGENCPP_ORM_MODE unexpectedly succeeded!"
+            exit 1
+          fi
+          cat "${INV_LOG}"
+          grep -q "Invalid SQLGENCPP_ORM_MODE" "${INV_LOG}"

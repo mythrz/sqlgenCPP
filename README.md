@@ -41,7 +41,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 
 | Date | Platform / Toolchain | O3DE Engine Commit | `CodeFirstCppDB_sqlgen` Pin | Modes & Verification |
 |---|---|---|---|---|
-| 2026-11-26 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`: 18/18 `sqlgenCPP.Tests` (including composite-PK + FK single/batch upsert) passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`), and `libstdc++exp.a` not linked when `SQLGENCPP_ENABLE_STACKTRACE=OFF`. `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host (no `3rdParty::sqlite`): `AUTO` fell back cleanly, `REQUIRED` failed with `3rdParty::sqlite` diagnostic. |
+| 2026-11-26 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`: 18/18 `sqlgenCPP.Tests` (including composite-PK + FK single/batch upsert) + `MinimalGameConsumer` write/close/reopen passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`), and `libstdc++exp.a` not linked when `SQLGENCPP_ENABLE_STACKTRACE=OFF`. `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host (no `3rdParty::sqlite`): `AUTO` fell back cleanly, `REQUIRED` failed with `3rdParty::sqlite` diagnostic. |
 
 ---
 
@@ -96,7 +96,7 @@ All 8 `SqlgenCPPPathServiceTest.*` tests still build and pass in `OFF` mode.
 
 ## Using `sqlgenCPP` in Your Game Gem
 
-Keep your game's ORM entities and `DbContext` in a dedicated C++26 static sub-target behind a C++20 (`-fno-exceptions`) header façade so `#include <AzCore/...>` is never mixed with `import std;` / `import dal;` (`-fexceptions`).
+Keep your game's ORM entities and `DbContext` in a dedicated C++26 static sub-target behind a C++20 (`-fno-exceptions`) header façade so `#include <AzCore/...>` is never mixed with `import std;` / `import codefirst.dal;` (`-fexceptions`).
 
 See the complete, runnable consumer pattern in [**`Examples/MinimalGameConsumer/`**](Examples/MinimalGameConsumer/README.md), which includes:
 - [**`CMakeLists.snippet.cmake`**](Examples/MinimalGameConsumer/CMakeLists.snippet.cmake) — Both **Required** (`-DSQLGENCPP_ORM_MODE=REQUIRED`) and **Optional** (`if(TARGET Gem::sqlgenCPP.ORM)`) consumer target configurations.
