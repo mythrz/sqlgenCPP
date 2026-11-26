@@ -163,6 +163,13 @@ namespace sqlgenCPP
             return AZ::Failure(AZStd::string("Database path escapes the configured database directory via symlink."));
         }
 
+        std::error_code statusEc;
+        const std::filesystem::file_status existingStatus = std::filesystem::status(canonicalResolved, statusEc);
+        if (!statusEc && std::filesystem::is_directory(existingStatus))
+        {
+            return AZ::Failure(AZStd::string("Database path points to an existing directory, not a file."));
+        }
+
         if (createParentDirectory && canonicalResolved.has_parent_path())
         {
             std::error_code ec;

@@ -127,6 +127,34 @@ namespace
         EXPECT_FALSE(std::filesystem::exists(outsideDir.dir / "evil.db"));
     }
 
+    TEST(SqlgenCPPPathServiceTest, RejectsExistingDirectoryWithoutTrailingSlash)
+    {
+        ScopedTempDir userRoot("o3de_sqlgencpp_existing_dir");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
+        std::error_code ec;
+        const auto savesDir = userRoot.dir / "Database" / "Saves";
+        std::filesystem::create_directories(savesDir, ec);
+        ASSERT_FALSE(ec);
+
+        const auto savesLink = userRoot.dir / "Database" / "SavesLink";
+        std::filesystem::create_directory_symlink(savesDir, savesLink, ec);
+        ASSERT_FALSE(ec);
+
+        sqlgenCPP::sqlgenCPPSystemComponent component;
+        auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
+        ASSERT_NE(requests, nullptr);
+
+        const auto directOutcome = requests->ResolveDatabasePath("Saves", false, false);
+        EXPECT_FALSE(directOutcome.IsSuccess());
+
+        const auto createParentOutcome = requests->ResolveDatabasePath("Saves", true, false);
+        EXPECT_FALSE(createParentOutcome.IsSuccess());
+
+        const auto symlinkDirOutcome = requests->ResolveDatabasePath("SavesLink", false, false);
+        EXPECT_FALSE(symlinkDirOutcome.IsSuccess());
+    }
+
     TEST(SqlgenCPPPathServiceTest, EBusBroadcastsWhenComponentActivated)
     {
         struct TestableSystemComponent : sqlgenCPP::sqlgenCPPSystemComponent
