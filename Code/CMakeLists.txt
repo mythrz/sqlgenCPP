@@ -26,6 +26,7 @@ set(SQLGENCPP_ORM_MODE "AUTO"
     CACHE STRING "CodeFirst C++26 ORM build mode: AUTO (enable if supported), REQUIRED (fail if unsupported), or OFF (path service only)")
 set_property(CACHE SQLGENCPP_ORM_MODE PROPERTY STRINGS AUTO REQUIRED OFF)
 option(SQLGENCPP_ENABLE_STACKTRACE "Enable Debug std::stacktrace capture in CodeFirstCppDB::Core" OFF)
+option(SQLGENCPP_LEGACY_MODULE_ALIASES "Export deprecated 'core'/'dal' module aliases re-exporting 'codefirst.*'" OFF)
 
 string(TOUPPER "${SQLGENCPP_ORM_MODE}" _sqlgencpp_orm_mode_upper)
 if(NOT _sqlgencpp_orm_mode_upper MATCHES "^(AUTO|REQUIRED|OFF)$")
@@ -67,6 +68,7 @@ else()
         set(CODEFIRST_INCLUDE_SAMPLES OFF CACHE BOOL "" FORCE)
         set(CODEFIRST_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(CODEFIRST_ENABLE_STACKTRACE ${SQLGENCPP_ENABLE_STACKTRACE} CACHE BOOL "" FORCE)
+        set(CODEFIRST_LEGACY_MODULE_ALIASES ${SQLGENCPP_LEGACY_MODULE_ALIASES} CACHE BOOL "" FORCE)
 
         add_subdirectory("${SQLGENCPP_CODEFIRST_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CodeFirstCppDB" EXCLUDE_FROM_ALL)
 

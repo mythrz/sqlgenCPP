@@ -90,7 +90,11 @@ namespace sqlgenCPP
             }
             if (auto resolved = fileIO->ResolvePath(AZ::IO::PathView("@user@/Database")); resolved.has_value())
             {
-                return AZStd::string(resolved->c_str());
+                std::error_code canonEc;
+                const std::filesystem::path rawDir(resolved->c_str());
+                const std::filesystem::path canonicalDir = std::filesystem::weakly_canonical(rawDir, canonEc);
+                const std::filesystem::path resultDir = canonEc ? rawDir.lexically_normal() : canonicalDir;
+                return AZStd::string(resultDir.string().c_str());
             }
             // FileIO is active but @user@/Database failed to resolve: never silently fall back to OS temp.
             return {};
@@ -105,8 +109,11 @@ namespace sqlgenCPP
         const auto tempBase = std::filesystem::temp_directory_path(ec);
         if (!ec)
         {
-            const auto fallbackDir = (tempBase / "O3DE_sqlgenCPP").lexically_normal();
-            return AZStd::string(fallbackDir.string().c_str());
+            const std::filesystem::path rawFallback = (tempBase / "O3DE_sqlgenCPP").lexically_normal();
+            std::error_code canonEc;
+            const std::filesystem::path canonicalFallback = std::filesystem::weakly_canonical(rawFallback, canonEc);
+            const std::filesystem::path resultDir = canonEc ? rawFallback : canonicalFallback;
+            return AZStd::string(resultDir.string().c_str());
         }
 
         return {};
@@ -120,6 +127,11 @@ namespace sqlgenCPP
         if (relativeDbPath.empty())
         {
             return AZ::Failure(AZStd::string("Database path must not be empty."));
+        }
+
+        if (relativeDbPath.find('\0') != AZStd::string_view::npos)
+        {
+            return AZ::Failure(AZStd::string("Database path must not contain embedded NUL characters."));
         }
 
         if (relativeDbPath == ":memory:")

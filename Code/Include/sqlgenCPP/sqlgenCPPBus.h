@@ -25,9 +25,11 @@ namespace sqlgenCPP
         virtual ~sqlgenCPPRequests() = default;
 
         //! Resolves a relative SQLite database path strictly contained within O3DE's writable
-        //! @user@/Database directory.
+        //! @user@/Database directory and returns a weakly-canonical native path.
         //! - ":memory:" is returned unchanged without creating directories.
-        //! - Empty paths, absolute paths, and paths escaping @user@/Database via ".." are rejected.
+        //! - Empty paths, embedded NUL bytes, absolute paths, trailing directory separators,
+        //!   paths escaping @user@/Database via ".." or symlinks, and pre-existing directories
+        //!   passed without a trailing slash are rejected.
         //! - If AZ::IO::FileIOBase is active and @user@/Database fails to resolve, returns AZ::Failure
         //!   (never silently redirects player saves to OS temporary storage).
         //! - If AZ::IO::FileIOBase is absent (e.g. headless unit tests), returns AZ::Failure unless
@@ -37,7 +39,7 @@ namespace sqlgenCPP
             bool createParentDirectory = true,
             bool allowTempFallbackWhenNoFileIO = false) const = 0;
 
-        //! Returns the resolved default directory used for runtime SQLite databases (@user@/Database),
+        //! Returns the weakly-canonical default directory used for runtime SQLite databases (@user@/Database),
         //! or an empty string if unavailable (unless allowTempFallbackWhenNoFileIO is true and FileIOBase is absent).
         virtual AZStd::string GetDefaultDatabaseDirectory(
             bool allowTempFallbackWhenNoFileIO = false) const = 0;

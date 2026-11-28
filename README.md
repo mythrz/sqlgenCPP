@@ -15,7 +15,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
   - `REQUIRED`: Fails CMake configure with a clear `FATAL_ERROR` listing any missing prerequisites.
   - `OFF`: Explicitly builds the C++20 path service only (useful for testing the fallback path).
 - **Containment-Checked O3DE Path Service:** `sqlgenCPP::sqlgenCPPRequestBus` / `sqlgenCPPInterface` provides `ResolveDatabasePath`, `GetDefaultDatabaseDirectory`, and `IsCodeFirstOrmEnabled`:
-  - Enforces strict containment under `@user@/Database` (rejects empty paths, absolute paths, `..` traversal, symlink escapes, trailing directory separators, and pre-existing directories passed without a trailing slash).
+  - Enforces strict containment under `@user@/Database` (rejects empty paths, embedded NUL bytes, absolute paths, `..` traversal, symlink escapes, trailing directory separators, and pre-existing directories passed without a trailing slash) and returns a weakly-canonical native path.
   - Preserves `":memory:"`.
   - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`).
 - **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
@@ -34,14 +34,15 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 - **Build System:** **CMake 4.5+** and **Ninja** (`Ninja` or `Ninja Multi-Config`).
 - **CMake Options:**
   - `SQLGENCPP_ORM_MODE=AUTO|REQUIRED|OFF` (default: `AUTO`)
-  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF`, Debug `Core::DbError` stack traces return empty strings and `libstdc++exp.a` is not linked).
+  - `SQLGENCPP_ENABLE_STACKTRACE=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_ENABLE_STACKTRACE`; when `OFF` and `CODEFIRST_ENABLE_CONTRACTS=OFF`, Debug `Core::DbError` stack traces return empty strings and `libstdc++exp.a` is not linked).
+  - `SQLGENCPP_LEGACY_MODULE_ALIASES=ON|OFF` (default: `OFF` — forwarded to `CODEFIRST_LEGACY_MODULE_ALIASES`; keep `OFF` so bare `core`/`dal` module names are not exported into consuming O3DE projects, or set `ON` for deprecated `import core; import dal;` shims).
   - `SQLGENCPP_CODEFIRST_DIR=<path>` (default: bundled submodule `Code/External/CodeFirstCppDB_sqlgen`).
 
 ### Verified Pairings (Dated)
 
 | Date | Platform / Toolchain | O3DE Engine Commit | `CodeFirstCppDB_sqlgen` Pin | Modes & Verification |
 |---|---|---|---|---|
-| 2026-11-26 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`: 18/18 `sqlgenCPP.Tests` (including composite-PK + FK single/batch upsert) + `MinimalGameConsumer` write/close/reopen passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`), and `libstdc++exp.a` not linked when `SQLGENCPP_ENABLE_STACKTRACE=OFF`. `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host (no `3rdParty::sqlite`): `AUTO` fell back cleanly, `REQUIRED` failed with `3rdParty::sqlite` diagnostic. |
+| 2026-11-28 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`/`AUTO` (`profile`, `SQLGENCPP_LEGACY_MODULE_ALIASES=OFF`): 18/18 `sqlgenCPP.Tests` passed (normal & symlinked `$TMPDIR`) + `MinimalGameConsumer` (WAL-verified write/reopen & non-creating missing read) passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`). `sqlgenCPP.TestImpl` built in `release` and `debug` (`SQLGENCPP_ENABLE_STACKTRACE=OFF` omits `libstdc++exp.a`; `ON` links it in `debug`). `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host CI: 4/4 contracts passed. |
 
 ---
 

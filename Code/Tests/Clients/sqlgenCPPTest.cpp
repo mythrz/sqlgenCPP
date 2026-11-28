@@ -102,6 +102,7 @@ namespace
         EXPECT_FALSE(requests->ResolveDatabasePath(".", false, true).IsSuccess());
         EXPECT_FALSE(requests->ResolveDatabasePath("Saves/", false, true).IsSuccess());
         EXPECT_FALSE(requests->ResolveDatabasePath("Saves/.", false, true).IsSuccess());
+        EXPECT_FALSE(requests->ResolveDatabasePath(AZStd::string_view("valid.db\0/../evil", 17), false, true).IsSuccess());
     }
 
     TEST(SqlgenCPPPathServiceTest, RejectsSymlinkEscapeOutsideUserDatabaseDir)
@@ -224,16 +225,17 @@ namespace
         auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
         ASSERT_NE(requests, nullptr);
 
+        const std::filesystem::path expectedBase =
+            std::filesystem::weakly_canonical(userRoot.dir / "Database");
+
         const AZStd::string defaultDir = requests->GetDefaultDatabaseDirectory(false);
         ASSERT_FALSE(defaultDir.empty());
-        EXPECT_EQ(
-            std::filesystem::path(defaultDir.c_str()).lexically_normal(),
-            (userRoot.dir / "Database").lexically_normal());
+        EXPECT_EQ(std::filesystem::path(defaultDir.c_str()), expectedBase);
 
         const auto saveOutcome = requests->ResolveDatabasePath("Saves/slot1.db", true, false);
         ASSERT_TRUE(saveOutcome.IsSuccess()) << saveOutcome.GetError().c_str();
         const std::filesystem::path resolved(saveOutcome.GetValue().c_str());
-        EXPECT_EQ(resolved, (userRoot.dir / "Database" / "Saves" / "slot1.db").lexically_normal());
+        EXPECT_EQ(resolved, expectedBase / "Saves" / "slot1.db");
         EXPECT_TRUE(std::filesystem::exists(resolved.parent_path()));
 
         // Containment still holds under live FileIO
@@ -332,7 +334,8 @@ namespace
         ASSERT_TRUE(pathOutcome.IsSuccess()) << pathOutcome.GetError().c_str();
 
         const std::filesystem::path dbPath(pathOutcome.GetValue().c_str());
-        const std::filesystem::path expectedDir = (userRoot.dir / "Database" / "Saves").lexically_normal();
+        const std::filesystem::path expectedDir =
+            std::filesystem::weakly_canonical(userRoot.dir / "Database" / "Saves");
         EXPECT_EQ(dbPath.parent_path(), expectedDir);
 
         const auto res = sqlgenCPP::Tests::RunReopenPersistenceTest(dbPath.string());

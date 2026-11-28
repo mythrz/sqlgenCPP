@@ -45,6 +45,33 @@ namespace MyGame::Persistence
             opts.busy_timeout = std::chrono::milliseconds{ 5000 };
             return opts;
         }
+
+        std::optional<std::string> VerifyWalModeIfDisk(SaveDbContext& db, const std::string& dbPath)
+        {
+            if (dbPath == ":memory:")
+            {
+                return std::nullopt;
+            }
+            auto walCheck = db.query_rows("PRAGMA journal_mode;");
+            if (!walCheck || walCheck->rows.empty() || walCheck->rows[0].cells.empty())
+            {
+                return "Failed to query PRAGMA journal_mode";
+            }
+            const auto* modeStr = std::get_if<std::string>(&walCheck->rows[0].cells[0]);
+            if (!modeStr)
+            {
+                return "Unexpected non-string result from PRAGMA journal_mode";
+            }
+            std::string modeLower = *modeStr;
+            std::ranges::transform(modeLower, modeLower.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (modeLower != "wal")
+            {
+                return "Expected PRAGMA journal_mode='wal', got '" + modeLower + "'";
+            }
+            return std::nullopt;
+        }
     } // namespace
 
     SaveStatus SavePlayerProfile(const std::string& dbPath, const PlayerSaveProfile& profile) noexcept
@@ -58,6 +85,10 @@ namespace MyGame::Persistence
             }
 
             SaveDbContext db(*conn);
+            if (auto walErr = VerifyWalModeIfDisk(db, dbPath); walErr.has_value())
+            {
+                return SaveStatus{ false, *walErr };
+            }
             if (auto schemaRes = db.ensure_created(); !schemaRes)
             {
                 return SaveStatus{ false, "Schema creation failed: " + schemaRes.error().to_string() };
@@ -91,6 +122,21 @@ namespace MyGame::Persistence
     {
         try
         {
+            if (dbPath != ":memory:")
+            {
+                std::error_code ec;
+                const bool exists = std::filesystem::exists(dbPath, ec);
+                if (ec)
+                {
+                    return LoadProfileResult{ false, std::nullopt, "Failed to inspect save file: " + ec.message() };
+                }
+                if (!exists)
+                {
+                    // Avoid creating an empty .db file on disk during a read of a missing save slot.
+                    return LoadProfileResult{ true, std::nullopt, {} };
+                }
+            }
+
             auto conn = DAL::SQLiteConnection::connect(dbPath, MakeSaveConnectionOptions());
             if (!conn)
             {

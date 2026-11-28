@@ -52,7 +52,6 @@ if(TARGET Gem::sqlgenCPP.ORM)
             PRIVATE
                 Gem::sqlgenCPP.ORM
     )
-    set(_mygame_has_orm 1)
 else()
     ly_add_target(
         NAME MyGame.SaveStore STATIC
@@ -65,18 +64,16 @@ else()
             PUBLIC
                 Source/Persistence
     )
-    set(_mygame_has_orm 0)
 endif()
 
 # Then link `Gem::MyGame.SaveStore` and `Gem::sqlgenCPP.API` into your ordinary
-# C++20 (-fno-exceptions) Game Gem private target:
+# C++20 (-fno-exceptions) Game Gem private target. Runtime callers query
+# `MyGame::Persistence::IsOrmBackendAvailable()` (or you can add a compile-time
+# macro via COMPILE_DEFINITIONS if you also need #if gating):
 #
 # ly_add_target(
 #     NAME MyGame.Private.Object STATIC
 #     ...
-#     COMPILE_DEFINITIONS
-#         PRIVATE
-#             MYGAME_HAS_SQLGENCPP_ORM=${_mygame_has_orm}
 #     BUILD_DEPENDENCIES
 #         PUBLIC
 #             Gem::sqlgenCPP.API
