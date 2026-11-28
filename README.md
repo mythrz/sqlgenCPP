@@ -15,13 +15,13 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
   - `REQUIRED`: Fails CMake configure with a clear `FATAL_ERROR` listing any missing prerequisites.
   - `OFF`: Explicitly builds the C++20 path service only (useful for testing the fallback path).
 - **Containment-Checked O3DE Path Service:** `sqlgenCPP::sqlgenCPPRequestBus` / `sqlgenCPPInterface` provides `ResolveDatabasePath`, `GetDefaultDatabaseDirectory`, and `IsCodeFirstOrmEnabled`:
-  - Enforces strict containment under `@user@/Database` (rejects empty paths, embedded NUL bytes, absolute paths, `..` traversal, symlink escapes, trailing directory separators, and pre-existing directories passed without a trailing slash) and returns a weakly-canonical native path.
+  - Enforces strict containment under `@user@/Database` (rejects empty paths, embedded NUL bytes, absolute paths, `..` traversal, live or dangling symlinks anywhere under `@user@/Database`, trailing directory separators, and existing non-regular files such as directories, FIFOs, sockets, or devices) and returns a weakly-canonical native path.
   - Preserves `":memory:"`.
-  - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`).
+  - Never silently falls back to OS temporary storage when `AZ::IO::FileIOBase` is active; headless temp fallback requires explicit opt-in (`allowTempFallbackWhenNoFileIO = true`, using a per-UID temp subdirectory on POSIX for isolated tests only).
 - **AzTest Unit Test Suite (`Gem::sqlgenCPP.Tests`):**
   - Built when O3DE tests are enabled (`PAL_TRAIT_BUILD_TESTS_SUPPORTED=TRUE`) on a test-supported platform (currently **Linux**, where `PAL_TRAIT_SQLGENCPP_TEST_SUPPORTED=TRUE`).
-  - Path-service and `sqlgenCPPSystemComponent` tests (8 tests: compile-time ORM flag, lexical/directory rejection, symlink-escape rejection, existing-directory rejection, `EBus` activation, headless `:memory:`/temp fallback policy, live `AZ::IO::LocalFileIO` `@user@` alias, and unset-alias failure) build and run regardless of `SQLGENCPP_ORM_MODE` (including `OFF`).
-  - When ORM is enabled, also runs 10 C++26 tests (18 tests total) covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, composite-PK + FK single-row and batch upserts, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
+  - Path-service and `sqlgenCPPSystemComponent` tests (9 tests: compile-time ORM flag, lexical/NUL/directory rejection, live symlink-escape rejection, dangling symlink / non-directory parent / FIFO rejection, existing-directory rejection, `EBus` activation, headless `:memory:`/temp fallback policy, live `AZ::IO::LocalFileIO` `@user@` alias, and unset-alias failure) build and run regardless of `SQLGENCPP_ORM_MODE` (including `OFF`).
+  - When ORM is enabled, also runs 10 C++26 tests (19 tests total) covering schema creation + FK enforcement, initial data seeding, deferred Unit-of-Work `save_changes()`, transaction rollback, verified `PRAGMA journal_mode == "wal"` disk persistence, embedded-NUL typed `TEXT` round-trips, atomic batch `upsert_range` rollback, composite-PK + FK single-row and batch upserts, transactional `migrate_to` schema upgrades, and `SystemComponent` path + persistence.
 
 ---
 
@@ -42,7 +42,7 @@ A community [Open 3D Engine (O3DE)](https://github.com/o3de/o3de) Gem that integ
 
 | Date | Platform / Toolchain | O3DE Engine Commit | `CodeFirstCppDB_sqlgen` Pin | Modes & Verification |
 |---|---|---|---|---|
-| 2026-11-28 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`/`AUTO` (`profile`, `SQLGENCPP_LEGACY_MODULE_ALIASES=OFF`): 18/18 `sqlgenCPP.Tests` passed (normal & symlinked `$TMPDIR`) + `MinimalGameConsumer` (WAL-verified write/reopen & non-creating missing read) passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`). `sqlgenCPP.TestImpl` built in `release` and `debug` (`SQLGENCPP_ENABLE_STACKTRACE=OFF` omits `libstdc++exp.a`; `ON` links it in `debug`). `OFF`: 8/8 `sqlgenCPP.Tests` + optional consumer stub passed. Reduced host CI: 4/4 contracts passed. |
+| 2026-11-28 | Linux `x86_64`, GCC 16.2.1, CMake 4.5.0, Ninja Multi-Config | [`mythrz/o3de@ed33eb4c`](https://github.com/mythrz/o3de/commit/ed33eb4cdca78260c387f7c9e70549d13e146583) | [`affc3dd`](https://github.com/mythrz/CodeFirstCppDB_sqlgen/commit/affc3dd0870ff10c0d1c6fe344bdd13d97d374cf) | `REQUIRED`/`AUTO` (`profile`, `SQLGENCPP_LEGACY_MODULE_ALIASES=OFF`): 19/19 `sqlgenCPP.Tests` passed (normal & symlinked `$TMPDIR`, including dangling symlinks & FIFO rejection) + `MinimalGameConsumer` (WAL-verified write/reopen, non-creating missing read, OOM-safe `noexcept` firewall) passed; 0 dynamic `libsqlite3.so` (`ldd`), single static `sqlite3_open_v2` (`nm`). `sqlgenCPP.TestImpl` built in `release` and `debug` (`SQLGENCPP_ENABLE_STACKTRACE=OFF` omits `libstdc++exp.a`; `ON` links it in `debug`). `OFF`: 9/9 `sqlgenCPP.Tests` passed. Reduced host CI: 4/4 contracts passed. |
 
 ---
 
@@ -91,7 +91,7 @@ cmake --build <BUILD_DIR_OFF> --config profile --target AzTestRunner sqlgenCPP.T
 <BUILD_DIR_OFF>/bin/profile/AzTestRunner <BUILD_DIR_OFF>/bin/profile/libsqlgenCPP.Tests.so AzRunUnitTests
 ```
 
-All 8 `SqlgenCPPPathServiceTest.*` tests still build and pass in `OFF` mode.
+All 9 `SqlgenCPPPathServiceTest.*` tests still build and pass in `OFF` mode.
 
 ---
 

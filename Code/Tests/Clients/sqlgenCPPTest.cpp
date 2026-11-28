@@ -21,7 +21,12 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
+
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 namespace
 {
@@ -126,6 +131,52 @@ namespace
 
         EXPECT_FALSE(requests->ResolveDatabasePath("escape_link/evil.db", true, false).IsSuccess());
         EXPECT_FALSE(std::filesystem::exists(outsideDir.dir / "evil.db"));
+    }
+
+    TEST(SqlgenCPPPathServiceTest, RejectsDanglingSymlinksNonDirectoryParentsAndNonRegularFiles)
+    {
+        ScopedTempDir userRoot("o3de_sqlgencpp_dangling_user");
+        ScopedTempDir outsideDir("o3de_sqlgencpp_dangling_outside");
+        ScopedLocalFileIO fileIO(userRoot.dir.string().c_str());
+
+        std::error_code ec;
+        const auto dbDir = userRoot.dir / "Database";
+        std::filesystem::create_directories(dbDir, ec);
+        ASSERT_FALSE(ec);
+
+        // 1. Dangling leaf symlink pointing outside @user@/Database (target does not exist yet)
+        const auto danglingLeaf = dbDir / "dangling_leaf.db";
+        std::filesystem::create_symlink(outsideDir.dir / "pwn.db", danglingLeaf, ec);
+        ASSERT_FALSE(ec);
+
+        // 2. Dangling intermediate directory symlink pointing outside @user@/Database
+        const auto danglingDir = dbDir / "dangling_dir";
+        std::filesystem::create_directory_symlink(outsideDir.dir / "new_subdir", danglingDir, ec);
+        ASSERT_FALSE(ec);
+
+        // 3. Regular file used as an intermediate parent directory component
+        const auto regularParent = dbDir / "not_a_dir";
+        {
+            std::ofstream out(regularParent);
+            out << "x";
+        }
+        ASSERT_TRUE(std::filesystem::is_regular_file(regularParent));
+
+        sqlgenCPP::sqlgenCPPSystemComponent component;
+        auto* requests = sqlgenCPP::sqlgenCPPInterface::Get();
+        ASSERT_NE(requests, nullptr);
+
+        EXPECT_FALSE(requests->ResolveDatabasePath("dangling_leaf.db", true, false).IsSuccess());
+        EXPECT_FALSE(requests->ResolveDatabasePath("dangling_dir/pwn.db", true, false).IsSuccess());
+        EXPECT_FALSE(std::filesystem::exists(outsideDir.dir / "new_subdir"));
+        EXPECT_FALSE(requests->ResolveDatabasePath("not_a_dir/save.db", false, false).IsSuccess());
+
+#if !defined(_WIN32)
+        // 4. Non-regular file (POSIX named pipe / FIFO)
+        const auto fifoPath = dbDir / "pipe.db";
+        ASSERT_EQ(::mkfifo(fifoPath.c_str(), 0600), 0);
+        EXPECT_FALSE(requests->ResolveDatabasePath("pipe.db", false, false).IsSuccess());
+#endif
     }
 
     TEST(SqlgenCPPPathServiceTest, RejectsExistingDirectoryWithoutTrailingSlash)

@@ -28,19 +28,24 @@ namespace sqlgenCPP
         //! @user@/Database directory and returns a weakly-canonical native path.
         //! - ":memory:" is returned unchanged without creating directories.
         //! - Empty paths, embedded NUL bytes, absolute paths, trailing directory separators,
-        //!   paths escaping @user@/Database via ".." or symlinks, and pre-existing directories
-        //!   passed without a trailing slash are rejected.
+        //!   ".." traversal, symbolic links (live or dangling, intermediate or leaf) inside
+        //!   @user@/Database, and existing non-regular files (directories, FIFOs, sockets, devices)
+        //!   are rejected.
         //! - If AZ::IO::FileIOBase is active and @user@/Database fails to resolve, returns AZ::Failure
         //!   (never silently redirects player saves to OS temporary storage).
-        //! - If AZ::IO::FileIOBase is absent (e.g. headless unit tests), returns AZ::Failure unless
-        //!   allowTempFallbackWhenNoFileIO is explicitly set to true.
+        //! - If AZ::IO::FileIOBase is absent (e.g. isolated headless unit tests), returns AZ::Failure
+        //!   unless allowTempFallbackWhenNoFileIO is explicitly set to true.
+        //! - Note: Validation occurs at resolution time; because SQLite opens databases by pathname,
+        //!   a filesystem TOCTOU window inherently exists if an attacker can mutate @user@/Database
+        //!   between ResolveDatabasePath() and sqlite3_open_v2().
         virtual AZ::Outcome<AZStd::string, AZStd::string> ResolveDatabasePath(
             AZStd::string_view relativeDbPath,
             bool createParentDirectory = true,
             bool allowTempFallbackWhenNoFileIO = false) const = 0;
 
         //! Returns the weakly-canonical default directory used for runtime SQLite databases (@user@/Database),
-        //! or an empty string if unavailable (unless allowTempFallbackWhenNoFileIO is true and FileIOBase is absent).
+        //! or an empty string if unavailable (unless allowTempFallbackWhenNoFileIO is true and FileIOBase is absent,
+        //! in which case an isolated per-UID temp directory is used on POSIX for headless tests only).
         virtual AZStd::string GetDefaultDatabaseDirectory(
             bool allowTempFallbackWhenNoFileIO = false) const = 0;
 

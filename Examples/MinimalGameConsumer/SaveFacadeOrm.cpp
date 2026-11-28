@@ -72,6 +72,24 @@ namespace MyGame::Persistence
             }
             return std::nullopt;
         }
+
+        std::string SafeFormatException(const char* prefix, const char* detail) noexcept
+        {
+            try
+            {
+                std::string msg(prefix);
+                if (detail != nullptr)
+                {
+                    msg += detail;
+                }
+                return msg;
+            }
+            catch (...)
+            {
+                // Never allow secondary allocation failure (e.g. std::bad_alloc) to call std::terminate()
+                return {};
+            }
+        }
     } // namespace
 
     SaveStatus SavePlayerProfile(const std::string& dbPath, const PlayerSaveProfile& profile) noexcept
@@ -110,11 +128,11 @@ namespace MyGame::Persistence
         }
         catch (const std::exception& ex)
         {
-            return SaveStatus{ false, std::string("Unhandled exception in SavePlayerProfile: ") + ex.what() };
+            return SaveStatus{ false, SafeFormatException("Unhandled exception in SavePlayerProfile: ", ex.what()) };
         }
         catch (...)
         {
-            return SaveStatus{ false, "Unhandled unknown exception in SavePlayerProfile" };
+            return SaveStatus{ false, SafeFormatException("Unhandled unknown exception in SavePlayerProfile", nullptr) };
         }
     }
 
@@ -174,11 +192,11 @@ namespace MyGame::Persistence
         }
         catch (const std::exception& ex)
         {
-            return LoadProfileResult{ false, std::nullopt, std::string("Unhandled exception in LoadPlayerProfile: ") + ex.what() };
+            return LoadProfileResult{ false, std::nullopt, SafeFormatException("Unhandled exception in LoadPlayerProfile: ", ex.what()) };
         }
         catch (...)
         {
-            return LoadProfileResult{ false, std::nullopt, "Unhandled unknown exception in LoadPlayerProfile" };
+            return LoadProfileResult{ false, std::nullopt, SafeFormatException("Unhandled unknown exception in LoadPlayerProfile", nullptr) };
         }
     }
 

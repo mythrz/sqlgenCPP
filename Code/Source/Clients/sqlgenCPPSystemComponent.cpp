@@ -15,6 +15,11 @@
 #include <AzCore/Serialization/SerializeContext.h>
 
 #include <filesystem>
+#include <string>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace sqlgenCPP
 {
@@ -109,7 +114,13 @@ namespace sqlgenCPP
         const auto tempBase = std::filesystem::temp_directory_path(ec);
         if (!ec)
         {
-            const std::filesystem::path rawFallback = (tempBase / "O3DE_sqlgenCPP").lexically_normal();
+#if !defined(_WIN32)
+            const std::string fallbackLeaf =
+                "O3DE_sqlgenCPP_" + std::to_string(static_cast<unsigned long>(::geteuid()));
+#else
+            const std::string fallbackLeaf = "O3DE_sqlgenCPP";
+#endif
+            const std::filesystem::path rawFallback = (tempBase / fallbackLeaf).lexically_normal();
             std::error_code canonEc;
             const std::filesystem::path canonicalFallback = std::filesystem::weakly_canonical(rawFallback, canonEc);
             const std::filesystem::path resultDir = canonEc ? rawFallback : canonicalFallback;
@@ -165,21 +176,84 @@ namespace sqlgenCPP
             return AZ::Failure(AZStd::string("Database path escapes the configured database directory."));
         }
 
-        // Resolve any existing symlinks along the path to prevent symlink-based escapes
+        // Reject any symbolic link (live or dangling, intermediate or leaf) inside the database directory.
+        // Note: weakly_canonical() alone does not resolve dangling symlinks because exists(status()) is false.
         std::error_code canonBaseEc;
-        std::error_code canonPathEc;
         const std::filesystem::path canonicalBase = std::filesystem::weakly_canonical(baseDir, canonBaseEc);
+        if (canonBaseEc)
+        {
+            return AZ::Failure(AZStd::string("Failed to canonicalize configured database directory."));
+        }
+
+        const std::filesystem::path relFromBase = resolvedPath.lexically_relative(baseDir);
+        {
+            std::filesystem::path walked = canonicalBase;
+            for (auto it = relFromBase.begin(); it != relFromBase.end(); ++it)
+            {
+                walked /= *it;
+                auto nextIt = it;
+                ++nextIt;
+                const bool isLeaf = (nextIt == relFromBase.end());
+
+                std::error_code symEc;
+                const std::filesystem::file_status symStatus = std::filesystem::symlink_status(walked, symEc);
+                if (symEc)
+                {
+                    if (symEc == std::errc::no_such_file_or_directory || symEc == std::errc::not_a_directory)
+                    {
+                        break;
+                    }
+                    return AZ::Failure(AZStd::string::format(
+                        "Failed to inspect database path component '%s': %s",
+                        walked.string().c_str(),
+                        symEc.message().c_str()));
+                }
+                if (std::filesystem::is_symlink(symStatus))
+                {
+                    return AZ::Failure(AZStd::string("Database path must not traverse or target a symbolic link."));
+                }
+                if (symStatus.type() == std::filesystem::file_type::not_found)
+                {
+                    break;
+                }
+                if (!isLeaf && !std::filesystem::is_directory(symStatus))
+                {
+                    return AZ::Failure(AZStd::string("Database parent path component is not a directory."));
+                }
+            }
+        }
+
+        // Defense-in-depth canonical containment check
+        std::error_code canonPathEc;
         const std::filesystem::path canonicalResolved = std::filesystem::weakly_canonical(resolvedPath, canonPathEc);
-        if (canonBaseEc || canonPathEc || !IsStrictlyContainedInBase(canonicalBase, canonicalResolved))
+        if (canonPathEc || !IsStrictlyContainedInBase(canonicalBase, canonicalResolved))
         {
             return AZ::Failure(AZStd::string("Database path escapes the configured database directory via symlink."));
         }
 
         std::error_code statusEc;
-        const std::filesystem::file_status existingStatus = std::filesystem::status(canonicalResolved, statusEc);
-        if (!statusEc && std::filesystem::is_directory(existingStatus))
+        const std::filesystem::file_status existingStatus = std::filesystem::symlink_status(canonicalResolved, statusEc);
+        if (statusEc && statusEc != std::errc::no_such_file_or_directory && statusEc != std::errc::not_a_directory)
         {
-            return AZ::Failure(AZStd::string("Database path points to an existing directory, not a file."));
+            return AZ::Failure(AZStd::string::format(
+                "Failed to inspect resolved database path '%s': %s",
+                canonicalResolved.string().c_str(),
+                statusEc.message().c_str()));
+        }
+        if (!statusEc && std::filesystem::is_symlink(existingStatus))
+        {
+            return AZ::Failure(AZStd::string("Database path must not target a symbolic link."));
+        }
+        if (!statusEc && std::filesystem::exists(existingStatus))
+        {
+            if (std::filesystem::is_directory(existingStatus))
+            {
+                return AZ::Failure(AZStd::string("Database path points to an existing directory, not a file."));
+            }
+            if (!std::filesystem::is_regular_file(existingStatus))
+            {
+                return AZ::Failure(AZStd::string("Database path points to a non-regular file."));
+            }
         }
 
         if (createParentDirectory && canonicalResolved.has_parent_path())
